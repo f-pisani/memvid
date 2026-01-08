@@ -59,28 +59,6 @@ impl<'de> Deserialize<'de> for CanonicalEncoding {
     }
 }
 
-/// Tier classification for a memory (informational only).
-/// NOTE: Tier-based capacity limits have been removed - all tiers have unlimited storage.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Tier {
-    /// Free tier (no longer capacity-limited).
-    Free,
-    /// Developer tier (no longer capacity-limited).
-    Dev,
-    /// Enterprise tier (no longer capacity-limited).
-    Enterprise,
-}
-
-impl Tier {
-    /// Maximum nominal capacity in bytes for the tier.
-    /// NOTE: Tier-based limits have been removed - all tiers have unlimited capacity.
-    #[must_use]
-    pub fn capacity_bytes(self) -> u64 {
-        u64::MAX
-    }
-}
-
 /// Marker type signifying an open (mutable) memory.
 pub struct Open;
 

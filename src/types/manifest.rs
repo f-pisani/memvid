@@ -6,7 +6,7 @@ use serde::{
     ser::SerializeStruct,
 };
 
-use super::{common::FrameId, frame::Frame, ticket::TicketRef};
+use super::{common::FrameId, frame::Frame};
 
 use std::{fmt, marker::PhantomData};
 
@@ -800,7 +800,6 @@ pub struct Toc {
     pub sketch_track: Option<SketchTrackManifest>,
     #[serde(default)]
     pub segment_catalog: SegmentCatalog,
-    pub ticket_ref: TicketRef,
     /// Optional memory binding to dashboard
     #[serde(default)]
     pub memory_binding: Option<super::MemoryBinding>,

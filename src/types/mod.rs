@@ -22,7 +22,6 @@ pub mod sketch_track;
 pub mod structure;
 #[cfg(feature = "temporal_track")]
 pub mod temporal;
-pub mod ticket;
 pub mod verification;
 
 pub use ask::{
@@ -33,7 +32,7 @@ pub use audit::{AuditOptions, AuditReport, SourceSpan};
 pub use binding::{FileInfo, MemoryBinding};
 pub use common::{
     CanonicalEncoding, EnrichmentState, EnrichmentTask, FrameId, FrameRole, FrameStatus,
-    MemvidHandle, Open, Sealed, Tier,
+    MemvidHandle, Open, Sealed,
 };
 // AnchorSource always exported - not feature-gated to maintain binary compatibility
 pub use frame::AnchorSource;
@@ -70,7 +69,6 @@ pub use temporal::{
     TemporalCapabilities, TemporalFilter, TemporalMention, TemporalMentionFlags,
     TemporalMentionKind, TemporalTrack,
 };
-pub use ticket::{Ticket, TicketRef};
 pub use verification::{
     DOCTOR_PLAN_VERSION, DoctorActionDetail, DoctorActionKind, DoctorActionPlan,
     DoctorActionReport, DoctorActionStatus, DoctorFinding, DoctorFindingCode, DoctorMetrics,
