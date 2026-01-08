@@ -2584,20 +2584,9 @@ impl Memvid {
     }
 
     fn ensure_mutation_allowed(&mut self) -> Result<()> {
-        self.ensure_writable()?;
-        if self.toc.ticket_ref.issuer == "free-tier" {
-            return Ok(());
-        }
-        match self.tier() {
-            Tier::Free => Ok(()),
-            tier => {
-                if self.toc.ticket_ref.issuer.trim().is_empty() {
-                    Err(MemvidError::TicketRequired { tier })
-                } else {
-                    Ok(())
-                }
-            }
-        }
+        // NOTE: Tier-based mutation restrictions have been removed.
+        // All mutations are now allowed regardless of tier or ticket status.
+        self.ensure_writable()
     }
 
     pub(crate) fn tier(&self) -> Tier {
@@ -2611,17 +2600,13 @@ impl Memvid {
     }
 
     pub(crate) fn capacity_limit(&self) -> u64 {
-        if self.toc.ticket_ref.capacity_bytes != 0 {
-            self.toc.ticket_ref.capacity_bytes
-        } else {
-            self.tier().capacity_bytes()
-        }
+        // NOTE: Capacity limits have been removed - always return unlimited.
+        u64::MAX
     }
 
     /// Get current storage capacity in bytes.
     ///
-    /// Returns the capacity from the applied ticket, or the default
-    /// tier capacity (1 GB for free tier).
+    /// NOTE: Capacity limits have been removed - always returns unlimited (u64::MAX).
     pub fn get_capacity(&self) -> u64 {
         self.capacity_limit()
     }
@@ -3144,7 +3129,7 @@ impl Memvid {
 
         let mut prepared_payload: Option<(Vec<u8>, CanonicalEncoding, Option<u64>)> = None;
         let payload_tail = self.payload_region_end();
-        let projected = if let Some(bytes) = payload {
+        let _projected = if let Some(bytes) = payload {
             let (prepared, encoding, length) = prepare_canonical_payload(bytes)?;
             let len = prepared.len();
             prepared_payload = Some((prepared, encoding, length));
@@ -3158,15 +3143,9 @@ impl Memvid {
             });
         };
 
-        let capacity_limit = self.capacity_limit();
-        if projected > capacity_limit {
-            let incoming_size = projected.saturating_sub(payload_tail);
-            return Err(MemvidError::CapacityExceeded {
-                current: payload_tail,
-                limit: capacity_limit,
-                required: incoming_size,
-            });
-        }
+        // NOTE: Capacity limit enforcement has been removed.
+        // All data sizes are now accepted without restriction.
+        let _ = self.capacity_limit(); // Keep for API compatibility
         let timestamp = options.timestamp.take().unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

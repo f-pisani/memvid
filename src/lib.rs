@@ -1272,23 +1272,22 @@ mod tests {
     }
 
     #[test]
-    fn capacity_limit_enforced() {
+    fn capacity_unlimited() {
+        // NOTE: Capacity limits have been removed - verify unlimited storage works.
         run_serial_test(|| {
             let dir = tempdir().expect("tmp");
             let path = dir.path().join("capacity.mv2");
 
             let mut mem = Memvid::create(&path).expect("create");
-            let base = mem.data_end;
-            mem.apply_ticket(Ticket::new("issuer", 2).capacity_bytes(base + 64))
+            mem.apply_ticket(Ticket::new("issuer", 2).capacity_bytes(64))
                 .expect("apply ticket");
 
+            // Both puts should succeed - no capacity limits
             mem.put_bytes(&vec![0xFF; 32]).expect("first put");
             mem.commit().expect("commit");
 
-            let err = mem
-                .put_bytes(&vec![0xFF; 40])
-                .expect_err("capacity exceeded");
-            assert!(matches!(err, MemvidError::CapacityExceeded { .. }));
+            mem.put_bytes(&vec![0xFF; 40]).expect("second put - no limit");
+            mem.commit().expect("second commit");
         });
     }
 }
