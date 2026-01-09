@@ -184,18 +184,26 @@ mod tests {
         let path = temp.path();
         writeln!(&mut temp.as_file().try_clone().unwrap(), "seed").unwrap();
 
-        let file = OpenOptions::new()
+        // First handle acquires the lock
+        let file1 = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
-            .expect("open file");
-        let guard = FileLock::acquire(&file, path).expect("first lock succeeds");
+            .expect("open file 1");
+        let guard = FileLock::acquire(&file1, path).expect("first lock succeeds");
 
-        let second = FileLock::try_acquire(&file, path).expect("second lock attempt");
+        // Second handle (separate open, simulating another process) should be blocked
+        let file2 = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .expect("open file 2");
+        let second = FileLock::try_acquire(&file2, path).expect("second lock attempt");
         assert!(second.is_none(), "lock should already be held");
 
+        // After dropping the first lock, third attempt should succeed
         drop(guard);
-        let third = FileLock::try_acquire(&file, path).expect("third lock attempt");
+        let third = FileLock::try_acquire(&file2, path).expect("third lock attempt");
         assert!(third.is_some(), "lock released after drop");
     }
 }
