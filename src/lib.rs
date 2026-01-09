@@ -130,9 +130,9 @@ pub use types::{
     MEMVID_EMBEDDING_PROVIDER_KEY, MediaManifest, MemvidHandle, Open, PutOptions,
     PutOptionsBuilder, Sealed, SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams,
     SearchRequest, SearchResponse, SegmentCatalog, SegmentCommon, SegmentCompression, SegmentMeta,
-    SegmentSpan, SourceSpan, Stats, TextChunkManifest, TextChunkRange,
-    TimeIndexManifest, TimeSegmentDescriptor, TimelineEntry, TimelineQuery, TimelineQueryBuilder,
-    Toc, VecEmbedder, VecIndexManifest, VecSegmentDescriptor, VectorCompression, VerificationCheck,
+    SegmentSpan, SourceSpan, Stats, TextChunkManifest, TextChunkRange, TimeIndexManifest,
+    TimeSegmentDescriptor, TimelineEntry, TimelineQuery, TimelineQueryBuilder, Toc, VecEmbedder,
+    VecIndexManifest, VecSegmentDescriptor, VectorCompression, VerificationCheck,
     VerificationReport, VerificationStatus,
 };
 // Memory card types for structured memory extraction and storage
