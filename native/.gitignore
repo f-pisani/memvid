@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+target/
+dist/
+*.node
+
+# Generated files
+index.js
+index.d.ts
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test coverage
+coverage/

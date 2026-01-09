@@ -1,0 +1,62 @@
+{
+  "name": "memvid-node",
+  "version": "1.0.0",
+  "description": "Node.js bindings for memvid-core - unlimited local AI memory",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">= 18"
+  },
+  "scripts": {
+    "build": "npm run build:native && npm run build:ts",
+    "build:native": "napi build --platform --release",
+    "build:native:debug": "napi build --platform",
+    "build:ts": "tsc",
+    "build:debug": "npm run build:native:debug && npm run build:ts",
+    "clean": "rm -rf dist *.node",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build"
+  },
+  "napi": {
+    "name": "memvid-node",
+    "triples": {
+      "defaults": true,
+      "additional": [
+        "aarch64-apple-darwin"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^2.18.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "dist/**/*",
+    "*.node"
+  ],
+  "keywords": [
+    "memvid",
+    "ai",
+    "memory",
+    "embeddings",
+    "vector-search",
+    "rag",
+    "llm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/memvid/memvid"
+  }
+}

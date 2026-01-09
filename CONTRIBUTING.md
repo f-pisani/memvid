@@ -9,6 +9,10 @@ Thank you for your interest in contributing to Memvid! We welcome contributions 
 - **Rust 1.85.0+** — Install from [rustup.rs](https://rustup.rs)
 - **Git** — For version control
 
+For Node.js bindings development:
+- **Node.js 20+** — Install from [nodejs.org](https://nodejs.org)
+- **npm** — Included with Node.js
+
 ### Setup
 
 1. **Fork the repository** on GitHub
@@ -95,17 +99,42 @@ git commit -m "docs: update README examples"
 
 ## Project Structure
 
+This is a **Cargo workspace** containing the Rust core library and language bindings.
+
 ```
 memvid/
-├── src/              # Source code
+├── Cargo.toml        # Workspace root + memvid-core package
+├── src/              # Rust core library (memvid-core)
 │   ├── lib.rs        # Public API
 │   ├── memvid/       # Core implementation
 │   ├── io/           # File I/O
 │   └── types/        # Type definitions
-├── tests/            # Integration tests
-├── examples/         # Example code
-├── benchmarks/       # Benchmarks
-└── data/             # Required data files
+├── tests/            # Rust integration tests
+├── examples/         # Rust examples
+├── native/           # Node.js bindings (memvid-node)
+│   ├── Cargo.toml    # NAPI-RS bindings
+│   ├── package.json  # npm package
+│   ├── src/          # Rust bindings + TypeScript wrapper
+│   └── __tests__/    # Vitest tests
+└── .github/workflows/
+    ├── ci.yml        # Rust core CI
+    └── native-ci.yml # Node.js bindings CI
+```
+
+### Working with the Workspace
+
+```bash
+# Build everything
+cargo build --workspace
+
+# Build only core
+cargo build -p memvid-core
+
+# Build only Node.js bindings
+cargo build -p memvid-node
+
+# Test everything
+cargo test --workspace
 ```
 
 ## Feature Flags
@@ -118,6 +147,99 @@ my_feature = ["dep:some-dependency"]
 ```
 
 This keeps the default build lean and fast.
+
+## Node.js Bindings Development
+
+The `native/` directory contains Node.js bindings using NAPI-RS.
+
+### Setup
+
+```bash
+cd native
+npm install
+```
+
+### Development Workflow
+
+```bash
+# Build native module (debug)
+npm run build:native:debug
+
+# Build TypeScript wrapper
+npm run build:ts
+
+# Run tests
+npm test
+
+# Full release build
+npm run build:native
+```
+
+### Testing Against Local Core Changes
+
+The `native/Cargo.toml` uses both `path` and `version` for the core dependency:
+
+```toml
+memvid-core = { version = "^2.0", path = "..", features = ["lex"] }
+```
+
+- During development: Uses local source (path)
+- During publish: Verifies compatibility with published version
+
+## Release Workflow
+
+### Releasing memvid-core (Rust)
+
+1. Update version in `Cargo.toml`:
+   ```toml
+   version = "2.0.132"
+   ```
+
+2. Commit and tag:
+   ```bash
+   git add Cargo.toml
+   git commit -m "chore: release memvid-core v2.0.132"
+   git tag v2.0.132
+   git push origin main --tags
+   ```
+
+3. Publish to crates.io:
+   ```bash
+   cargo publish
+   ```
+
+### Releasing memvid-node (Node.js)
+
+1. Ensure memvid-core is published first (if there are core changes)
+
+2. Update version in `native/package.json`:
+   ```json
+   "version": "1.0.1"
+   ```
+
+3. Update version compatibility in `native/Cargo.toml` if needed:
+   ```toml
+   memvid-core = { version = "^2.0.132", path = "..", features = ["lex"] }
+   ```
+
+4. Commit and tag (use `native-v` prefix):
+   ```bash
+   git add native/
+   git commit -m "chore: release memvid-node v1.0.1"
+   git tag native-v1.0.1
+   git push origin main --tags
+   ```
+
+5. The GitHub Action will build cross-platform binaries and publish to npm
+
+### Coordinated Releases
+
+When releasing both packages with breaking changes:
+
+1. Publish memvid-core to crates.io first
+2. Update `native/Cargo.toml` to require the new version
+3. Test the Node.js bindings: `cd native && npm test`
+4. Publish memvid-node to npm
 
 ## Reporting Issues
 

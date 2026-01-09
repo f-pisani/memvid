@@ -1,0 +1,146 @@
+name: Native (Node.js) CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'native/**'
+      - '.github/workflows/native-ci.yml'
+
+defaults:
+  run:
+    working-directory: native
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            native/target/
+          key: ${{ runner.os }}-cargo-native-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build native module
+        run: npm run build:native:debug
+
+      - name: Build TypeScript
+        run: npm run build:ts
+
+      - name: Run tests
+        run: npm test
+
+  build:
+    name: Build - ${{ matrix.settings.target }}
+    runs-on: ${{ matrix.settings.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        settings:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.settings.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            native/target/
+          key: ${{ runner.os }}-cargo-native-${{ matrix.settings.target }}-${{ hashFiles('native/Cargo.lock') }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build:native
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.settings.target }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.settings.target }}
+          path: native/*.node
+          if-no-files-found: error
+
+  # Publish job (only on release tags matching native-v*)
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: startsWith(github.ref, 'refs/tags/native-v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: native/artifacts
+
+      - name: Move artifacts
+        run: |
+          ls -la artifacts/
+          mv artifacts/*/*.node .
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build TypeScript
+        run: npm run build:ts
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
