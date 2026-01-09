@@ -1,17 +1,20 @@
 #[cfg(test)]
 mod tests {
     use crate::{Memvid, PutOptions, SearchRequest, run_serial_test};
-    use tempfile::NamedTempFile;
+    use tempfile::TempDir;
 
     #[test]
     fn test_lex_persists_and_search_works() {
         run_serial_test(|| {
-            let temp = NamedTempFile::new().unwrap();
-            let path = temp.path();
+            // Use TempDir with a nested file path instead of NamedTempFile.
+            // On Windows, NamedTempFile keeps the file open with DELETE_ON_CLOSE
+            // which conflicts with Memvid's file locking semantics.
+            let dir = TempDir::new().unwrap();
+            let path = dir.path().join("test.mv2");
 
             // Phase 1: create, enable lex, ingest docs with periodic seals
             {
-                let mut mem = Memvid::create(path).unwrap();
+                let mut mem = Memvid::create(&path).unwrap();
                 mem.enable_lex().unwrap();
 
                 for i in 0..1000 {
@@ -43,7 +46,7 @@ mod tests {
 
             // Phase 2: reopen RO and search
             {
-                let mut mem = Memvid::open_read_only(path).unwrap();
+                let mut mem = Memvid::open_read_only(&path).unwrap();
                 assert!(mem.lex_enabled, "lex_enabled should persist after reopen");
                 assert!(
                     mem.toc.segment_catalog.lex_enabled,

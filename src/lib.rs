@@ -344,6 +344,15 @@ impl Drop for Memvid {
         if self.dirty {
             let _ = self.commit();
         }
+        // On Windows, explicitly drop the Tantivy engine before other resources.
+        // TantivyEngine::Drop waits for merging threads to complete and releases
+        // all mmap file handles. This must happen before the main file lock is
+        // released to avoid "Access denied" errors when the file is reopened.
+        #[cfg(feature = "lex")]
+        {
+            // Take ownership to trigger TantivyEngine::drop() immediately
+            drop(self.tantivy.take());
+        }
         // Clean up temporary manifest.wal file (parallel_segments feature)
         #[cfg(feature = "parallel_segments")]
         {
