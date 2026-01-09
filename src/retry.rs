@@ -21,13 +21,14 @@ use crate::error::Result;
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // Fields used only on Windows
 pub struct RetryConfig {
-    /// Maximum number of retry attempts (must be >= 1)
+    /// Total number of attempts including the initial call (must be >= 1).
+    /// With max_attempts=5, the operation runs once, then retries up to 4 times.
     pub max_attempts: usize,
     /// Initial delay between retries (default: 50ms)
     pub initial_delay: Duration,
     /// Maximum delay between retries (default: 1600ms)
     pub max_delay: Duration,
-    /// Exponential backoff factor (default: 2.0)
+    /// Exponential backoff multiplier (must be > 1.0, default: 2.0)
     pub factor: f32,
 }
 
@@ -95,7 +96,7 @@ fn is_transient(err: &MemvidError) -> bool {
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `config.max_attempts` is 0.
+/// Panics in debug builds if `config.max_attempts` is 0 or `config.factor` <= 1.0.
 #[cfg(windows)]
 pub fn retry_transient<T, F>(config: RetryConfig, operation: F) -> Result<T>
 where
@@ -107,12 +108,20 @@ where
         config.max_attempts > 0,
         "RetryConfig.max_attempts must be at least 1"
     );
+    debug_assert!(
+        config.factor > 1.0,
+        "RetryConfig.factor must be > 1.0 for exponential backoff"
+    );
+
+    // max_attempts is total attempts; backon's max_times is number of retries after first attempt
+    let max_retries = config.max_attempts.saturating_sub(1);
 
     let backoff = ExponentialBuilder::default()
+        .with_jitter() // Prevent thundering herd on concurrent retries
         .with_min_delay(config.initial_delay)
         .with_max_delay(config.max_delay)
         .with_factor(config.factor)
-        .with_max_times(config.max_attempts);
+        .with_max_times(max_retries);
 
     operation
         .retry(backoff)
@@ -133,17 +142,20 @@ where
 ///
 /// # Panics
 ///
-/// Panics in debug builds if `config.max_attempts` is 0.
+/// Panics in debug builds if `config.max_attempts` is 0 or `config.factor` <= 1.0.
 #[cfg(not(windows))]
-pub fn retry_transient<T, F>(config: RetryConfig, mut operation: F) -> Result<T>
+pub fn retry_transient<T, F>(_config: RetryConfig, mut operation: F) -> Result<T>
 where
     F: FnMut() -> Result<T>,
 {
     debug_assert!(
-        config.max_attempts > 0,
+        _config.max_attempts > 0,
         "RetryConfig.max_attempts must be at least 1"
     );
-    let _ = config; // Suppress unused warning (already used in debug_assert)
+    debug_assert!(
+        _config.factor > 1.0,
+        "RetryConfig.factor must be > 1.0 for exponential backoff"
+    );
     operation()
 }
 
