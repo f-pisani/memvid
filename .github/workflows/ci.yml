@@ -41,16 +41,8 @@ jobs:
       - name: Build
         run: cargo build -p memvid-core --verbose
 
-      - name: Run tests (Unix)
-        if: runner.os != 'Windows'
+      - name: Run tests
         run: cargo test -p memvid-core --verbose
-
-      - name: Run tests (Windows)
-        if: runner.os == 'Windows'
-        # Run tests with single thread on Windows to avoid file locking contention
-        # Windows mmap/file locking semantics can cause "Access is denied" errors
-        # when multiple tests create Tantivy indexes simultaneously
-        run: cargo test -p memvid-core --verbose -- --test-threads=1
 
   lint:
     name: Lint
