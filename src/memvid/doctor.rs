@@ -926,7 +926,6 @@ impl DoctorExecutor {
                         }
                     } else {
                         // Not a corruption we can fix, fail normally
-                        println!("doctor: try_open failed with error: {}", err);
                         additional_findings.push(DoctorFinding::error(
                             DoctorFindingCode::LockContention,
                             err.to_string(),

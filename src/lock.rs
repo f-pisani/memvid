@@ -50,21 +50,14 @@ impl FileLock {
 
     /// Attempts a non-blocking exclusive lock, returning None if already locked.
     ///
-    /// On Windows, includes brief retry logic to handle the case where a recently
-    /// dropped file handle hasn't fully released its lock yet. This is necessary
-    /// because Windows file lock release is not fully synchronous.
-    pub fn try_acquire(_file: &File, path: &Path) -> Result<Option<Self>> {
-        let clone = OpenOptions::new().read(true).write(true).open(path)?;
+    /// IMPORTANT: We must clone the file handle rather than opening a new one.
+    /// On Windows, exclusive locks acquired on a separately-opened handle block
+    /// all other handles (even in the same process) from accessing the file.
+    /// By cloning, we share the same underlying OS file object, which allows
+    /// both handles to access the file while the lock is held.
+    pub fn try_acquire(file: &File, _path: &Path) -> Result<Option<Self>> {
+        let clone = file.try_clone()?;
         let contended_kind = lock_contended_error().kind();
-
-        // On Windows, recently dropped file handles may not have fully released
-        // their locks yet. Retry briefly to handle this race condition.
-        #[cfg(windows)]
-        const MAX_QUICK_RETRIES: u32 = 10;
-        #[cfg(windows)]
-        const QUICK_RETRY_DELAY: Duration = Duration::from_millis(10);
-        #[cfg(windows)]
-        let mut attempts = 0u32;
 
         loop {
             match clone.try_lock_exclusive() {
@@ -75,18 +68,7 @@ impl FileLock {
                     }));
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) if err.kind() == contended_kind => {
-                    // On Windows, briefly retry in case the previous holder just released
-                    #[cfg(windows)]
-                    {
-                        if attempts < MAX_QUICK_RETRIES {
-                            attempts += 1;
-                            thread::sleep(QUICK_RETRY_DELAY);
-                            continue;
-                        }
-                    }
-                    return Ok(None);
-                }
+                Err(err) if err.kind() == contended_kind => return Ok(None),
                 Err(err) => return Err(MemvidError::Lock(err.to_string())),
             }
         }

@@ -288,15 +288,16 @@ impl Memvid {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
+    use tempfile::TempDir;
 
     #[test]
     fn test_sketch_insert_and_query() {
-        let tmp = NamedTempFile::new().expect("tempfile");
-        let path = tmp.path();
+        // Use TempDir instead of NamedTempFile for Windows compatibility.
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("test.mv2");
 
         // Create a new memory
-        let mut mem = Memvid::create(path).expect("create");
+        let mut mem = Memvid::create(&path).expect("create");
 
         // Insert some test sketches
         mem.insert_sketch(0, "cats are wonderful pets", SketchVariant::Small);
@@ -312,10 +313,12 @@ mod tests {
 
     #[test]
     fn test_sketch_candidate_speed() {
-        let tmp = NamedTempFile::new().expect("tempfile");
-        let path = tmp.path();
+        // Use TempDir instead of NamedTempFile for Windows compatibility.
+        // NamedTempFile opens with DELETE_ON_CLOSE which conflicts with Tantivy's mmap.
+        let dir = TempDir::new().expect("tempdir");
+        let path = dir.path().join("test.mv2");
 
-        let mut mem = Memvid::create(path).expect("create");
+        let mut mem = Memvid::create(&path).expect("create");
 
         // Insert many sketches for a realistic benchmark
         let docs = [
