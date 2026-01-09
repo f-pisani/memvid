@@ -17,6 +17,7 @@ pub mod io;
 pub mod lex;
 mod lock;
 pub mod lockfile;
+pub mod retry;
 pub mod memvid;
 pub mod models;
 pub mod pii;

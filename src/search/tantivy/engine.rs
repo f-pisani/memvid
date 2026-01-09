@@ -1,6 +1,7 @@
 use super::query;
 use super::schema::{build_schema, initialise_tokenizer};
 use super::util::to_search_value;
+use crate::retry::{RetryConfig, retry_transient};
 use crate::search::parser::ParsedQuery;
 use crate::types::{Frame, FrameId};
 use crate::{MemvidError, Result};
@@ -251,44 +252,10 @@ impl TantivyEngine {
     pub fn commit(&mut self) -> Result<()> {
         let mut writer = self.take_writer()?;
 
-        // On Windows, file operations can fail intermittently due to:
-        // 1. Windows Defender/antivirus scanning newly created files
-        // 2. Delayed release of mmap file handles
-        // We retry with exponential backoff to handle these transient failures.
-        #[cfg(windows)]
-        {
-            use std::thread;
-            use std::time::Duration;
-
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 50;
-
-            let mut last_err = None;
-            for attempt in 0..MAX_RETRIES {
-                match writer.commit() {
-                    Ok(_) => {
-                        last_err = None;
-                        break;
-                    }
-                    Err(err) => {
-                        last_err = Some(err);
-                        if attempt < MAX_RETRIES - 1 {
-                            let delay = INITIAL_DELAY_MS * (1 << attempt);
-                            thread::sleep(Duration::from_millis(delay));
-                        }
-                    }
-                }
-            }
-            if let Some(err) = last_err {
-                return Err(MemvidError::Tantivy {
-                    reason: err.to_string(),
-                });
-            }
-        }
-
-        #[cfg(not(windows))]
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
 
         writer
@@ -301,37 +268,12 @@ impl TantivyEngine {
         Ok(())
     }
 
-    /// Reload the reader with Windows retry logic for transient file access failures.
+    /// Reload the reader with retry logic for transient file access failures on Windows.
     fn reload_reader(&self) -> Result<()> {
-        #[cfg(windows)]
-        {
-            use std::thread;
-            use std::time::Duration;
-
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 50;
-
-            let mut last_err = None;
-            for attempt in 0..MAX_RETRIES {
-                match self.reader.reload() {
-                    Ok(()) => return Ok(()),
-                    Err(err) => {
-                        last_err = Some(err);
-                        if attempt < MAX_RETRIES - 1 {
-                            let delay = INITIAL_DELAY_MS * (1 << attempt);
-                            thread::sleep(Duration::from_millis(delay));
-                        }
-                    }
-                }
-            }
-            return Err(MemvidError::Tantivy {
-                reason: last_err.unwrap().to_string(),
-            });
-        }
-
-        #[cfg(not(windows))]
-        self.reader.reload().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+        retry_transient(RetryConfig::for_tantivy(), || {
+            self.reader.reload().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })
     }
 
@@ -341,41 +283,10 @@ impl TantivyEngine {
     pub fn soft_commit(&mut self) -> Result<()> {
         let writer = self.writer_mut()?;
 
-        // Windows retry logic for transient file access failures
-        #[cfg(windows)]
-        {
-            use std::thread;
-            use std::time::Duration;
-
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 50;
-
-            let mut last_err = None;
-            for attempt in 0..MAX_RETRIES {
-                match writer.commit() {
-                    Ok(_) => {
-                        last_err = None;
-                        break;
-                    }
-                    Err(err) => {
-                        last_err = Some(err);
-                        if attempt < MAX_RETRIES - 1 {
-                            let delay = INITIAL_DELAY_MS * (1 << attempt);
-                            thread::sleep(Duration::from_millis(delay));
-                        }
-                    }
-                }
-            }
-            if let Some(err) = last_err {
-                return Err(MemvidError::Tantivy {
-                    reason: err.to_string(),
-                });
-            }
-        }
-
-        #[cfg(not(windows))]
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
 
         // Don't wait for merge threads - let them run in background
@@ -403,18 +314,20 @@ impl TantivyEngine {
             .map_err(|err| MemvidError::Tantivy {
                 reason: err.to_string(),
             })?;
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
+
         writer
             .wait_merging_threads()
             .map_err(|err| MemvidError::Tantivy {
                 reason: err.to_string(),
             })?;
         self.index_writer = Some(self.create_writer()?);
-        self.reader.reload().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
-        })?;
+        self.reload_reader()?;
         Ok(())
     }
 
