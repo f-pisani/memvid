@@ -39,7 +39,6 @@ use super::{
 #[cfg(feature = "temporal_track")]
 use crate::TemporalTrackManifest;
 use crate::analysis::auto_tag::AutoTagger;
-use crate::constants::{WAL_SIZE_LARGE, WAL_SIZE_MEDIUM};
 use crate::footer::CommitFooter;
 use crate::io::wal::{EmbeddedWal, WalRecord};
 use crate::memvid::chunks::{plan_document_chunks, plan_text_chunks};
@@ -55,7 +54,7 @@ use crate::triplet::TripletExtractor;
 use crate::types::TantivySegmentDescriptor;
 use crate::types::{
     CanonicalEncoding, DocMetadata, Frame, FrameId, FrameRole, FrameStatus, PutOptions,
-    SegmentCommon, TextChunkManifest, Tier,
+    SegmentCommon, TextChunkManifest,
 };
 #[cfg(feature = "parallel_segments")]
 use crate::types::{IndexSegmentRef, SegmentKind, SegmentSpan, SegmentStats};
@@ -2583,49 +2582,6 @@ impl Memvid {
         Ok(())
     }
 
-    fn ensure_mutation_allowed(&mut self) -> Result<()> {
-        self.ensure_writable()?;
-        if self.toc.ticket_ref.issuer == "free-tier" {
-            return Ok(());
-        }
-        match self.tier() {
-            Tier::Free => Ok(()),
-            tier => {
-                if self.toc.ticket_ref.issuer.trim().is_empty() {
-                    Err(MemvidError::TicketRequired { tier })
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    pub(crate) fn tier(&self) -> Tier {
-        if self.header.wal_size >= WAL_SIZE_LARGE {
-            Tier::Enterprise
-        } else if self.header.wal_size >= WAL_SIZE_MEDIUM {
-            Tier::Dev
-        } else {
-            Tier::Free
-        }
-    }
-
-    pub(crate) fn capacity_limit(&self) -> u64 {
-        if self.toc.ticket_ref.capacity_bytes != 0 {
-            self.toc.ticket_ref.capacity_bytes
-        } else {
-            self.tier().capacity_bytes()
-        }
-    }
-
-    /// Get current storage capacity in bytes.
-    ///
-    /// Returns the capacity from the applied ticket, or the default
-    /// tier capacity (1 GB for free tier).
-    pub fn get_capacity(&self) -> u64 {
-        self.capacity_limit()
-    }
-
     pub(crate) fn rewrite_toc_footer(&mut self) -> Result<()> {
         tracing::info!(
             vec_segments = self.toc.segment_catalog.vec_segments.len(),
@@ -2917,7 +2873,7 @@ impl Memvid {
         mut options: PutOptions,
         embedding: Option<Vec<f32>>,
     ) -> Result<u64> {
-        self.ensure_mutation_allowed()?;
+        self.ensure_writable()?;
         let existing = self.frame_by_id(frame_id)?;
         if existing.status != FrameStatus::Active {
             return Err(MemvidError::InvalidFrame {
@@ -2992,7 +2948,7 @@ impl Memvid {
     }
 
     pub fn delete_frame(&mut self, frame_id: FrameId) -> Result<u64> {
-        self.ensure_mutation_allowed()?;
+        self.ensure_writable()?;
         let frame = self.frame_by_id(frame_id)?;
         if frame.status != FrameStatus::Active {
             return Err(MemvidError::InvalidFrame {
@@ -3057,7 +3013,7 @@ impl Memvid {
         mut options: PutOptions,
         supersedes: Option<FrameId>,
     ) -> Result<u64> {
-        self.ensure_mutation_allowed()?;
+        self.ensure_writable()?;
 
         // Deduplication: if enabled and we have payload, check if identical content exists
         if options.dedup {
@@ -3143,30 +3099,16 @@ impl Memvid {
         }
 
         let mut prepared_payload: Option<(Vec<u8>, CanonicalEncoding, Option<u64>)> = None;
-        let payload_tail = self.payload_region_end();
-        let projected = if let Some(bytes) = payload {
+        if let Some(bytes) = payload {
             let (prepared, encoding, length) = prepare_canonical_payload(bytes)?;
-            let len = prepared.len();
             prepared_payload = Some((prepared, encoding, length));
-            payload_tail.saturating_add(len as u64)
-        } else if reuse_frame.is_some() {
-            payload_tail
-        } else {
+        } else if reuse_frame.is_none() {
             return Err(MemvidError::InvalidFrame {
                 frame_id: 0,
                 reason: "payload required for frame insertion",
             });
-        };
-
-        let capacity_limit = self.capacity_limit();
-        if projected > capacity_limit {
-            let incoming_size = projected.saturating_sub(payload_tail);
-            return Err(MemvidError::CapacityExceeded {
-                current: payload_tail,
-                limit: capacity_limit,
-                required: incoming_size,
-            });
         }
+
         let timestamp = options.timestamp.take().unwrap_or_else(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)

@@ -108,9 +108,7 @@ pub use reader::{
     DocumentFormat, DocumentReader, PassthroughReader, PdfReader, ReaderDiagnostics, ReaderHint,
     ReaderOutput, ReaderRegistry,
 };
-pub use signature::{
-    parse_ed25519_public_key_base64, verify_model_manifest, verify_ticket_signature,
-};
+pub use signature::{parse_ed25519_public_key_base64, verify_model_manifest};
 pub use text::{NormalizedText, normalize_text, truncate_at_grapheme_boundary};
 #[cfg(feature = "temporal_track")]
 pub use types::{
@@ -132,9 +130,9 @@ pub use types::{
     MEMVID_EMBEDDING_PROVIDER_KEY, MediaManifest, MemvidHandle, Open, PutOptions,
     PutOptionsBuilder, Sealed, SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams,
     SearchRequest, SearchResponse, SegmentCatalog, SegmentCommon, SegmentCompression, SegmentMeta,
-    SegmentSpan, SourceSpan, Stats, TextChunkManifest, TextChunkRange, Ticket, TicketRef, Tier,
-    TimeIndexManifest, TimeSegmentDescriptor, TimelineEntry, TimelineQuery, TimelineQueryBuilder,
-    Toc, VecEmbedder, VecIndexManifest, VecSegmentDescriptor, VectorCompression, VerificationCheck,
+    SegmentSpan, SourceSpan, Stats, TextChunkManifest, TextChunkRange, TimeIndexManifest,
+    TimeSegmentDescriptor, TimelineEntry, TimelineQuery, TimelineQueryBuilder, Toc, VecEmbedder,
+    VecIndexManifest, VecSegmentDescriptor, VectorCompression, VerificationCheck,
     VerificationReport, VerificationStatus,
 };
 // Memory card types for structured memory extraction and storage
@@ -1255,40 +1253,26 @@ mod tests {
     }
 
     #[test]
-    fn ticket_sequence_enforced() {
+    fn unlimited_storage() {
+        // Verify unlimited storage works without restrictions.
         run_serial_test(|| {
             let dir = tempdir().expect("tmp");
-            let path = dir.path().join("ticket.mv2");
+            let path = dir.path().join("unlimited.mv2");
 
             let mut mem = Memvid::create(&path).expect("create");
-            mem.apply_ticket(Ticket::new("issuer", 2))
-                .expect("apply first");
 
-            let err = mem
-                .apply_ticket(Ticket::new("issuer", 2))
-                .expect_err("sequence must increase");
-            assert!(matches!(err, MemvidError::TicketSequence { .. }));
-        });
-    }
-
-    #[test]
-    fn capacity_limit_enforced() {
-        run_serial_test(|| {
-            let dir = tempdir().expect("tmp");
-            let path = dir.path().join("capacity.mv2");
-
-            let mut mem = Memvid::create(&path).expect("create");
-            let base = mem.data_end;
-            mem.apply_ticket(Ticket::new("issuer", 2).capacity_bytes(base + 64))
-                .expect("apply ticket");
-
+            // Multiple puts should succeed - no limits
             mem.put_bytes(&vec![0xFF; 32]).expect("first put");
             mem.commit().expect("commit");
 
-            let err = mem
-                .put_bytes(&vec![0xFF; 40])
-                .expect_err("capacity exceeded");
-            assert!(matches!(err, MemvidError::CapacityExceeded { .. }));
+            mem.put_bytes(&vec![0xFF; 64]).expect("second put");
+            mem.commit().expect("second commit");
+
+            mem.put_bytes(&vec![0xFF; 128]).expect("third put");
+            mem.commit().expect("third commit");
+
+            let stats = mem.stats().expect("stats");
+            assert_eq!(stats.frame_count, 3);
         });
     }
 }

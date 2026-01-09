@@ -12,7 +12,7 @@ use super::search::SearchHitTemporal;
 #[cfg(feature = "temporal_track")]
 use super::temporal::TemporalFilter;
 use super::{
-    common::{CanonicalEncoding, FrameId, FrameRole, FrameStatus, Tier},
+    common::{CanonicalEncoding, FrameId, FrameRole, FrameStatus},
     metadata::{DocMetadata, TextChunkManifest},
 };
 
@@ -96,18 +96,15 @@ impl TimelineQueryBuilder {
 }
 
 /// Public-facing statistics summarising a memory.
-/// Aggregates counts, sizes, capacity, and index presence for quick health checks.
+/// Aggregates counts, sizes, and index presence for quick health checks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Stats {
     pub frame_count: u64,
     pub size_bytes: u64,
-    pub tier: Tier,
     pub has_lex_index: bool,
     pub has_vec_index: bool,
     pub has_clip_index: bool,
     pub has_time_index: bool,
-    pub seq_no: Option<i64>,
-    pub capacity_bytes: u64,
     #[serde(default)]
     pub active_frame_count: u64,
     #[serde(default)]
@@ -121,14 +118,10 @@ pub struct Stats {
     #[serde(default)]
     pub savings_percent: f64,
     #[serde(default)]
-    pub storage_utilisation_percent: f64,
-    #[serde(default)]
-    pub remaining_capacity_bytes: u64,
-    #[serde(default)]
     pub average_frame_payload_bytes: u64,
     #[serde(default)]
     pub average_frame_logical_bytes: u64,
-    // PHASE 2: Detailed overhead breakdown for observability
+    // Detailed overhead breakdown for observability
     #[serde(default)]
     pub wal_bytes: u64,
     #[serde(default)]

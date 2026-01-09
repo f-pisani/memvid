@@ -1,0 +1,29 @@
+[package]
+name = "memvid-node"
+version = "1.0.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Node.js bindings for memvid-core"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Core memvid library
+# - path: uses local source for development
+# - version: ensures compatibility with published crate
+# Note: vec feature disabled for now due to ort-sys glibc requirements
+memvid-core = { version = "^2.0", path = "..", features = ["lex"] }
+
+# NAPI-RS for Node.js bindings
+napi = { version = "2", default-features = false, features = ["async", "serde-json", "napi8"] }
+napi-derive = "2"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+napi-build = "2"
+
+# Note: [profile.release] settings are in workspace root Cargo.toml

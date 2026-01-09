@@ -59,30 +59,6 @@ impl<'de> Deserialize<'de> for CanonicalEncoding {
     }
 }
 
-/// Tier captures the capacity and entitlement envelope for a memory.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Tier {
-    /// Free tier with small capacity.
-    Free,
-    /// Developer tier with higher caps.
-    Dev,
-    /// Enterprise tier with the largest caps.
-    Enterprise,
-}
-
-impl Tier {
-    /// Maximum nominal capacity in bytes for the tier.
-    #[must_use]
-    pub fn capacity_bytes(self) -> u64 {
-        match self {
-            Tier::Free => 50 * 1024 * 1024,              // 50 MB
-            Tier::Dev => 2 * 1024 * 1024 * 1024,         // 2 GB
-            Tier::Enterprise => 10 * 1024 * 1024 * 1024, // 10 GB
-        }
-    }
-}
-
 /// Marker type signifying an open (mutable) memory.
 pub struct Open;
 

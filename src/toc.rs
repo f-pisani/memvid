@@ -1,13 +1,9 @@
 use bincode::serde::{decode_from_slice, encode_to_vec};
 use blake3::Hasher;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     error::{MemvidError, Result},
-    types::{
-        Frame, IndexManifests, MemoryBinding, SegmentCatalog, SegmentMeta, TemporalTrackManifest,
-        TicketRef, TimeIndexManifest, Toc,
-    },
+    types::Toc,
 };
 
 fn canonical_config() -> impl bincode::config::Config {
@@ -17,90 +13,6 @@ fn canonical_config() -> impl bincode::config::Config {
         .with_limit::<{ crate::MAX_INDEX_BYTES as usize }>()
 }
 
-/// Legacy TOC format without memories_track field (pre-v2.0.105).
-/// Used for backwards compatibility with older .mv2 files.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct LegacyTocV1 {
-    pub toc_version: u64,
-    pub segments: Vec<SegmentMeta>,
-    pub frames: Vec<Frame>,
-    pub indexes: IndexManifests,
-    pub time_index: Option<TimeIndexManifest>,
-    pub temporal_track: Option<TemporalTrackManifest>,
-    // Note: memories_track, logic_mesh, replay_manifest NOT present
-    pub segment_catalog: SegmentCatalog,
-    pub ticket_ref: TicketRef,
-    pub memory_binding: Option<MemoryBinding>,
-    pub merkle_root: [u8; 32],
-    pub toc_checksum: [u8; 32],
-}
-
-/// Legacy TOC format with memories_track but without replay_manifest (pre-v2.0.116).
-/// Used for backwards compatibility with files created before replay feature.
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct LegacyTocV2 {
-    pub toc_version: u64,
-    pub segments: Vec<SegmentMeta>,
-    pub frames: Vec<Frame>,
-    pub indexes: IndexManifests,
-    pub time_index: Option<TimeIndexManifest>,
-    pub temporal_track: Option<TemporalTrackManifest>,
-    pub memories_track: Option<crate::types::MemoriesTrackManifest>,
-    pub logic_mesh: Option<crate::types::LogicMeshManifest>,
-    pub segment_catalog: SegmentCatalog,
-    pub ticket_ref: TicketRef,
-    pub memory_binding: Option<MemoryBinding>,
-    // Note: replay_manifest NOT present in this version
-    pub merkle_root: [u8; 32],
-    pub toc_checksum: [u8; 32],
-}
-
-impl From<LegacyTocV1> for Toc {
-    fn from(legacy: LegacyTocV1) -> Self {
-        Toc {
-            toc_version: legacy.toc_version,
-            segments: legacy.segments,
-            frames: legacy.frames,
-            indexes: legacy.indexes,
-            time_index: legacy.time_index,
-            temporal_track: legacy.temporal_track,
-            memories_track: None, // Default for legacy files
-            logic_mesh: None,     // Default for legacy files
-            sketch_track: None,   // Default for legacy files
-            segment_catalog: legacy.segment_catalog,
-            ticket_ref: legacy.ticket_ref,
-            memory_binding: legacy.memory_binding,
-            replay_manifest: None,                // Default for legacy files
-            enrichment_queue: Default::default(), // Default for legacy files
-            merkle_root: legacy.merkle_root,
-            toc_checksum: legacy.toc_checksum,
-        }
-    }
-}
-
-impl From<LegacyTocV2> for Toc {
-    fn from(legacy: LegacyTocV2) -> Self {
-        Toc {
-            toc_version: legacy.toc_version,
-            segments: legacy.segments,
-            frames: legacy.frames,
-            indexes: legacy.indexes,
-            time_index: legacy.time_index,
-            temporal_track: legacy.temporal_track,
-            memories_track: legacy.memories_track,
-            logic_mesh: legacy.logic_mesh,
-            sketch_track: None, // Default for pre-sketch files
-            segment_catalog: legacy.segment_catalog,
-            ticket_ref: legacy.ticket_ref,
-            memory_binding: legacy.memory_binding,
-            replay_manifest: None, // Default for pre-replay files
-            enrichment_queue: Default::default(), // Default for legacy files
-            merkle_root: legacy.merkle_root,
-            toc_checksum: legacy.toc_checksum,
-        }
-    }
-}
-
 impl Toc {
     /// Serialises the TOC using the canonical bincode configuration.
     pub fn encode(&self) -> Result<Vec<u8>> {
@@ -108,9 +20,7 @@ impl Toc {
     }
 
     /// Deserialises bytes into a TOC, rejecting any trailing data.
-    /// Supports current format and legacy formats (pre-replay_manifest, pre-memories_track).
     pub fn decode(bytes: &[u8]) -> Result<Self> {
-        // Try current format first (with replay_manifest)
         match decode_from_slice::<Toc, _>(bytes, canonical_config()) {
             Ok((toc, bytes_read)) => {
                 if bytes_read != bytes.len() {
@@ -118,78 +28,20 @@ impl Toc {
                         reason: "unexpected trailing bytes".into(),
                     });
                 }
-                return Ok(toc);
-            }
-            Err(_) => {}
-        }
-
-        // Try V2 format (with memories_track/logic_mesh, without replay_manifest)
-        match decode_from_slice::<LegacyTocV2, _>(bytes, canonical_config()) {
-            Ok((legacy, bytes_read)) => {
-                if bytes_read != bytes.len() {
-                    return Err(MemvidError::InvalidToc {
-                        reason: "unexpected trailing bytes in V2 format".into(),
-                    });
-                }
-                tracing::debug!("Decoded TOC V2 format (pre-replay_manifest)");
-                return Ok(legacy.into());
-            }
-            Err(_) => {}
-        }
-
-        // Try V1 format (without memories_track/logic_mesh/replay_manifest)
-        match decode_from_slice::<LegacyTocV1, _>(bytes, canonical_config()) {
-            Ok((legacy, bytes_read)) => {
-                if bytes_read != bytes.len() {
-                    return Err(MemvidError::InvalidToc {
-                        reason: "unexpected trailing bytes in V1 format".into(),
-                    });
-                }
-                tracing::debug!("Decoded TOC V1 format (pre-memories_track)");
-                return Ok(legacy.into());
+                Ok(toc)
             }
             Err(e) => Err(e.into()),
         }
     }
 
     /// Deserialises bytes into a TOC, allowing trailing data (for recovery).
-    /// Supports current format and legacy formats (pre-replay_manifest, pre-memories_track).
     pub fn decode_lenient(bytes: &[u8]) -> Result<Self> {
-        // Try current format first (with replay_manifest)
-        if let Ok((toc, _)) = decode_from_slice::<Toc, _>(bytes, canonical_config()) {
-            return Ok(toc);
-        }
-        // Try V2 format (with memories_track/logic_mesh, without replay_manifest)
-        if let Ok((legacy, _)) = decode_from_slice::<LegacyTocV2, _>(bytes, canonical_config()) {
-            tracing::debug!("Decoded TOC V2 format (pre-replay_manifest) in lenient mode");
-            return Ok(legacy.into());
-        }
-        // Try V1 format (without memories_track/logic_mesh/replay_manifest)
-        match decode_from_slice::<LegacyTocV1, _>(bytes, canonical_config()) {
-            Ok((legacy, _)) => {
-                tracing::debug!("Decoded TOC V1 format (pre-memories_track) in lenient mode");
-                Ok(legacy.into())
-            }
+        match decode_from_slice::<Toc, _>(bytes, canonical_config()) {
+            Ok((toc, _)) => Ok(toc),
             Err(e) => Err(e.into()),
         }
     }
-}
 
-impl LegacyTocV1 {
-    /// Encode legacy TOC format for checksum verification.
-    fn encode(&self) -> Result<Vec<u8>> {
-        Ok(encode_to_vec(self, canonical_config())?)
-    }
-}
-
-impl LegacyTocV2 {
-    /// Encode V2 TOC format for checksum verification.
-    fn encode(&self) -> Result<Vec<u8>> {
-        Ok(encode_to_vec(self, canonical_config())?)
-    }
-}
-
-impl Toc {
     /// Computes the BLAKE3 checksum used for the TOC integrity field.
     pub fn calculate_checksum(bytes: &[u8]) -> [u8; 32] {
         let mut hasher = Hasher::new();
@@ -198,68 +50,16 @@ impl Toc {
     }
 
     /// Verifies that the stored TOC checksum matches the deterministic encoding.
-    /// Supports current format and legacy format checksums for backwards compatibility.
     pub fn verify_checksum(&self) -> Result<()> {
-        // Try current format first (with replay_manifest)
         let mut clone = self.clone();
         clone.toc_checksum = [0u8; 32];
         let bytes = clone.encode()?;
         let digest = Self::calculate_checksum(&bytes);
         if digest == self.toc_checksum {
-            return Ok(());
+            Ok(())
+        } else {
+            Err(MemvidError::ChecksumMismatch { context: "toc" })
         }
-
-        // Try V2 format (with memories_track/logic_mesh, without replay_manifest)
-        // Only try if replay_manifest is None (indicates pre-replay origin)
-        if self.replay_manifest.is_none() {
-            let legacy_v2 = LegacyTocV2 {
-                toc_version: self.toc_version,
-                segments: self.segments.clone(),
-                frames: self.frames.clone(),
-                indexes: self.indexes.clone(),
-                time_index: self.time_index.clone(),
-                temporal_track: self.temporal_track.clone(),
-                memories_track: self.memories_track.clone(),
-                logic_mesh: self.logic_mesh.clone(),
-                segment_catalog: self.segment_catalog.clone(),
-                ticket_ref: self.ticket_ref.clone(),
-                memory_binding: self.memory_binding.clone(),
-                merkle_root: self.merkle_root,
-                toc_checksum: [0u8; 32],
-            };
-            let v2_bytes = legacy_v2.encode()?;
-            let v2_digest = Self::calculate_checksum(&v2_bytes);
-            if v2_digest == self.toc_checksum {
-                tracing::debug!("TOC checksum verified using V2 format (pre-replay)");
-                return Ok(());
-            }
-        }
-
-        // Try V1 format (without memories_track/logic_mesh/replay_manifest)
-        // Only try if memories_track is None (indicates V1 origin)
-        if self.memories_track.is_none() && self.replay_manifest.is_none() {
-            let legacy_v1 = LegacyTocV1 {
-                toc_version: self.toc_version,
-                segments: self.segments.clone(),
-                frames: self.frames.clone(),
-                indexes: self.indexes.clone(),
-                time_index: self.time_index.clone(),
-                temporal_track: self.temporal_track.clone(),
-                segment_catalog: self.segment_catalog.clone(),
-                ticket_ref: self.ticket_ref.clone(),
-                memory_binding: self.memory_binding.clone(),
-                merkle_root: self.merkle_root,
-                toc_checksum: [0u8; 32],
-            };
-            let v1_bytes = legacy_v1.encode()?;
-            let v1_digest = Self::calculate_checksum(&v1_bytes);
-            if v1_digest == self.toc_checksum {
-                tracing::debug!("TOC checksum verified using V1 format (pre-memories_track)");
-                return Ok(());
-            }
-        }
-
-        Err(MemvidError::ChecksumMismatch { context: "toc" })
     }
 }
 
@@ -268,7 +68,7 @@ mod tests {
     use super::*;
     use crate::types::{
         CanonicalEncoding, Frame, FrameId, FrameRole, FrameStatus, IndexManifests, SegmentCatalog,
-        SegmentCompression, SegmentMeta, TicketRef, TimeIndexManifest,
+        SegmentCompression, SegmentMeta, TimeIndexManifest,
     };
     use std::collections::BTreeMap;
 
@@ -361,12 +161,6 @@ mod tests {
             logic_mesh: None,
             sketch_track: None,
             segment_catalog: SegmentCatalog::default(),
-            ticket_ref: TicketRef {
-                issuer: "memvid".into(),
-                seq_no: 0,
-                expires_in_secs: 3600,
-                capacity_bytes: 0,
-            },
             memory_binding: None,
             replay_manifest: None,
             enrichment_queue: Default::default(),

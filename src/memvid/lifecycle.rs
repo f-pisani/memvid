@@ -29,7 +29,7 @@ use crate::types::FrameId;
 use crate::types::IndexSegmentRef;
 use crate::types::{
     FrameStatus, Header, IndexManifests, LogicMesh, MemoriesTrack, SchemaRegistry, SegmentCatalog,
-    SketchTrack, TicketRef, Tier, Toc, VectorCompression,
+    SketchTrack, Toc, VectorCompression,
 };
 #[cfg(feature = "temporal_track")]
 use crate::{TemporalTrack, temporal_track_read};
@@ -769,17 +769,10 @@ impl Memvid {
 
     /// Bind this file to a dashboard memory.
     ///
-    /// This stores the binding in the TOC and applies the ticket for capacity.
-    /// The caller (CLI/bindings) is responsible for fetching the ticket from the API.
-    ///
     /// # Errors
     ///
     /// Returns `MemoryAlreadyBound` if this file is already bound to a different memory.
-    pub fn bind_memory(
-        &mut self,
-        binding: crate::types::MemoryBinding,
-        ticket: crate::types::Ticket,
-    ) -> Result<()> {
+    pub fn bind_memory(&mut self, binding: crate::types::MemoryBinding) -> Result<()> {
         // Check existing binding
         if let Some(existing) = self.get_memory_binding() {
             if existing.memory_id != binding.memory_id {
@@ -791,9 +784,6 @@ impl Memvid {
             }
         }
 
-        // Apply ticket for capacity
-        self.apply_ticket(ticket)?;
-
         // Store binding in TOC
         self.toc.memory_binding = Some(binding);
         self.dirty = true;
@@ -802,17 +792,8 @@ impl Memvid {
     }
 
     /// Unbind this file from its dashboard memory.
-    ///
-    /// This clears the binding and reverts to free tier capacity (1 GB).
     pub fn unbind_memory(&mut self) -> Result<()> {
         self.toc.memory_binding = None;
-        // Revert to free tier
-        self.toc.ticket_ref = crate::types::TicketRef {
-            issuer: "free-tier".into(),
-            seq_no: 1,
-            expires_in_secs: 0,
-            capacity_bytes: crate::types::Tier::Free.capacity_bytes(),
-        };
         self.dirty = true;
         Ok(())
     }
@@ -1104,12 +1085,6 @@ pub(crate) fn empty_toc() -> Toc {
         logic_mesh: None,
         sketch_track: None,
         segment_catalog: SegmentCatalog::default(),
-        ticket_ref: TicketRef {
-            issuer: "free-tier".into(),
-            seq_no: 1,
-            expires_in_secs: 0,
-            capacity_bytes: Tier::Free.capacity_bytes(),
-        },
         memory_binding: None,
         replay_manifest: None,
         enrichment_queue: crate::types::EnrichmentQueueManifest::default(),
