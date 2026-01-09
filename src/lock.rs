@@ -3,7 +3,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use fs2::FileExt;
+use fs2::{FileExt, lock_contended_error};
 
 use crate::error::{MemvidError, Result};
 
@@ -51,6 +51,7 @@ impl FileLock {
     /// Attempts a non-blocking exclusive lock, returning None if already locked.
     pub fn try_acquire(_file: &File, path: &Path) -> Result<Option<Self>> {
         let clone = OpenOptions::new().read(true).write(true).open(path)?;
+        let contended_kind = lock_contended_error().kind();
         loop {
             match clone.try_lock_exclusive() {
                 Ok(()) => {
@@ -60,7 +61,7 @@ impl FileLock {
                     }));
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+                Err(err) if err.kind() == contended_kind => return Ok(None),
                 Err(err) => return Err(MemvidError::Lock(err.to_string())),
             }
         }
@@ -128,6 +129,7 @@ impl FileLock {
     fn lock_with_retry(file: &File, mode: LockMode) -> Result<()> {
         const MAX_ATTEMPTS: u32 = 200; // ~10 seconds with 50ms backoff
         const BACKOFF: Duration = Duration::from_millis(50);
+        let contended_kind = lock_contended_error().kind();
         let mut attempts = 0;
         loop {
             let result = match mode {
@@ -138,7 +140,7 @@ impl FileLock {
             match result {
                 Ok(()) => return Ok(()),
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(err) if err.kind() == contended_kind => {
                     if attempts >= MAX_ATTEMPTS {
                         return Err(MemvidError::Lock(
                             "exclusive access unavailable; file is in use by another process"
