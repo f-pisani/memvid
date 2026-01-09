@@ -258,6 +258,9 @@ impl TantivyEngine {
             })
         })?;
 
+        // wait_merging_threads() consumes the writer and waits for background merge
+        // threads to complete. It can't be retried since it takes ownership.
+        // File I/O errors from merges are reported here but the work is done.
         writer
             .wait_merging_threads()
             .map_err(|err| MemvidError::Tantivy {
@@ -321,6 +324,7 @@ impl TantivyEngine {
             })
         })?;
 
+        // wait_merging_threads() consumes the writer - can't be retried
         writer
             .wait_merging_threads()
             .map_err(|err| MemvidError::Tantivy {
