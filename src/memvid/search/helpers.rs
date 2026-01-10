@@ -8,9 +8,7 @@ use crate::types::FrameId;
 use crate::types::{
     FrameId, SearchHitTemporal, SearchHitTemporalAnchor, SearchHitTemporalMention, TemporalMention,
 };
-use crate::types::{
-    SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse,
-};
+use crate::types::{SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse};
 #[cfg(feature = "temporal_track")]
 use std::collections::HashMap;
 #[cfg(feature = "temporal_track")]
@@ -419,4 +417,3 @@ pub(super) fn enrich_hits_with_entities(hits: &mut [SearchHit], memvid: &Memvid)
         }
     }
 }
-

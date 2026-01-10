@@ -307,7 +307,6 @@ pub struct SearchResult {
     pub cursor: Option<String>,
 }
 
-
 // ============================================================================
 // MemvidHandle - Thread-safe wrapper
 // ============================================================================
@@ -553,10 +552,8 @@ impl MemvidHandle {
             .into_iter()
             .filter_map(|id| if id >= 0 { Some(id as u64) } else { None })
             .collect();
-        let exclude_uris: std::collections::HashSet<String> = exclude_uris_param
-            .unwrap_or_default()
-            .into_iter()
-            .collect();
+        let exclude_uris: std::collections::HashSet<String> =
+            exclude_uris_param.unwrap_or_default().into_iter().collect();
         let filter_uri = uri;
         let filter_scope = scope;
 
@@ -565,8 +562,11 @@ impl MemvidHandle {
             let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
             // Get more results than needed if filtering, to account for exclusions
-            let fetch_limit = if exclude_frame_ids.is_empty() && exclude_uris.is_empty()
-                && filter_uri.is_none() && filter_scope.is_none() {
+            let fetch_limit = if exclude_frame_ids.is_empty()
+                && exclude_uris.is_empty()
+                && filter_uri.is_none()
+                && filter_scope.is_none()
+            {
                 limit
             } else {
                 limit * 3 // Fetch extra to account for filtering
@@ -586,7 +586,9 @@ impl MemvidHandle {
 
                 // Get frame info for URI-based filtering
                 let frame = memvid.frame_by_id(h.frame_id).ok();
-                let frame_uri = frame.as_ref().and_then(|f| f.uri.clone())
+                let frame_uri = frame
+                    .as_ref()
+                    .and_then(|f| f.uri.clone())
                     .unwrap_or_else(|| format!("mv2://{}", h.frame_id));
                 let frame_title = frame.as_ref().and_then(|f| f.title.clone());
 

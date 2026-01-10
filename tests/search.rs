@@ -497,7 +497,10 @@ fn search_exclude_frame_ids() {
         })
         .unwrap();
 
-    assert!(results.hits.len() >= 2, "Should find at least 2 mechanics docs");
+    assert!(
+        results.hits.len() >= 2,
+        "Should find at least 2 mechanics docs"
+    );
     let first_frame_id = results.hits[0].frame_id;
 
     // Now exclude the first result
@@ -517,7 +520,10 @@ fn search_exclude_frame_ids() {
         "Filtered results should have fewer hits"
     );
     assert!(
-        !filtered_results.hits.iter().any(|h| h.frame_id == first_frame_id),
+        !filtered_results
+            .hits
+            .iter()
+            .any(|h| h.frame_id == first_frame_id),
         "Excluded frame ID should not appear in results"
     );
 }
@@ -558,7 +564,10 @@ fn search_exclude_uris() {
 
     // Should not contain the excluded URI
     assert!(
-        !filtered_results.hits.iter().any(|h| h.uri == "mv2://physics/quantum"),
+        !filtered_results
+            .hits
+            .iter()
+            .any(|h| h.uri == "mv2://physics/quantum"),
         "Excluded URI should not appear in results"
     );
 }

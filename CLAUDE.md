@@ -57,13 +57,16 @@ cargo build
 cargo build --release
 
 # Test
-cargo test
+cargo test -p memvid-core
 cargo test --test lifecycle
 cargo test -- --nocapture
 
-# Lint
-cargo clippy
-cargo fmt
+# Lint (MUST pass before pushing)
+cargo fmt --all -- --check
+cargo clippy --all-targets
+
+# Fix formatting
+cargo fmt --all
 
 # Run examples
 cargo run --example basic_usage
@@ -72,6 +75,26 @@ cargo run --example pdf_ingestion
 # Benchmarks
 cargo bench
 ```
+
+## Before Pushing Checklist
+
+**ALWAYS run these commands before pushing to ensure CI passes:**
+
+```bash
+# 1. Format check (CI will fail if not formatted)
+cargo fmt --all -- --check
+
+# 2. Run tests
+cargo test -p memvid-core
+
+# 3. If format check fails, fix it:
+cargo fmt --all
+```
+
+**Do NOT push without verifying locally that:**
+1. `cargo fmt --all -- --check` passes (no diff output)
+2. `cargo test -p memvid-core` passes
+3. Any new features have tests
 
 ## Key APIs
 
