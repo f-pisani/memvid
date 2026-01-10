@@ -128,7 +128,7 @@ pub use types::{
     EmbeddingIdentity, EmbeddingIdentityCount, EmbeddingIdentitySummary, Frame, FrameId, FrameRole,
     FrameStatus, Header, IndexManifests, LexIndexManifest, LexSegmentDescriptor,
     MEMVID_EMBEDDING_DIMENSION_KEY, MEMVID_EMBEDDING_MODEL_KEY, MEMVID_EMBEDDING_NORMALIZED_KEY,
-    MEMVID_EMBEDDING_PROVIDER_KEY, MediaManifest, MemvidHandle, Open, PutOptions,
+    MEMVID_EMBEDDING_PROVIDER_KEY, MediaManifest, MemoryFilter, MemvidHandle, Open, PutOptions,
     PutOptionsBuilder, Sealed, SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams,
     SearchRequest, SearchResponse, SegmentCatalog, SegmentCommon, SegmentCompression, SegmentMeta,
     SegmentSpan, SourceSpan, Stats, TextChunkManifest, TextChunkRange, TimeIndexManifest,
@@ -608,6 +608,7 @@ mod tests {
                 no_sketch: false,
                 exclude_frame_ids: Vec::new(),
                 exclude_uris: Vec::new(),
+                memory_filters: Vec::new(),
             };
             let response = mem.search(request).expect("search");
             assert_eq!(response.hits.len(), 1);
@@ -629,6 +630,7 @@ mod tests {
                 no_sketch: false,
                 exclude_frame_ids: Vec::new(),
                 exclude_uris: Vec::new(),
+                memory_filters: Vec::new(),
             };
             let response = reopened.search(request).expect("search reopened");
             assert_eq!(response.hits.len(), 1);
@@ -702,6 +704,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("search");
 
@@ -765,6 +768,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("search");
 
@@ -851,6 +855,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("uri search");
             assert_eq!(uri_response.engine, SearchEngineKind::Tantivy);
@@ -876,6 +881,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("scope search");
             assert_eq!(scope_response.engine, SearchEngineKind::Tantivy);
@@ -931,6 +937,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("page one");
             assert_eq!(first_page.engine, SearchEngineKind::Tantivy);
@@ -956,6 +963,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("page two");
             assert_eq!(second_page.engine, SearchEngineKind::Tantivy);
@@ -999,6 +1007,7 @@ mod tests {
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 })
                 .expect("search with tantivy");
 

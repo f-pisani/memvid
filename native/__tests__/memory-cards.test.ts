@@ -238,4 +238,156 @@ describe('Memory Cards', () => {
       expect(handle.memoryCardCount()).toBe(0);
     });
   });
+
+  describe('search with memoryFilters', () => {
+    it('should filter search results by entity', () => {
+      const handle = (mem as any).handle;
+
+      // Store documents about different topics
+      mem.put(Buffer.from('Alice works on machine learning projects.'), {
+        uri: 'doc://alice/work'
+      });
+      mem.put(Buffer.from('Bob works on machine learning too.'), {
+        uri: 'doc://bob/work'
+      });
+      mem.put(Buffer.from('Carol does machine learning research.'), {
+        uri: 'doc://carol/work'
+      });
+
+      // Add memory cards linking docs to entities
+      handle.putMemoryCard({
+        entity: 'alice',
+        slot: 'topic',
+        value: 'machine learning',
+        sourceFrameId: 0,
+      });
+      handle.putMemoryCard({
+        entity: 'bob',
+        slot: 'topic',
+        value: 'machine learning',
+        sourceFrameId: 1,
+      });
+
+      mem.commit();
+
+      // Search without filter - should find all docs
+      const allResults = mem.find('machine learning');
+      expect(allResults.hits.length).toBeGreaterThanOrEqual(2);
+
+      // Search with entity filter - should only find alice's doc
+      const aliceResults = mem.find('machine learning', {
+        memoryFilters: [{ entity: 'alice' }]
+      });
+      expect(aliceResults.hits.length).toBe(1);
+      expect(aliceResults.hits[0].uri).toBe('doc://alice/work');
+    });
+
+    it('should filter search results by slot', () => {
+      const handle = (mem as any).handle;
+
+      mem.put(Buffer.from('Programming languages include Python and Rust.'), {
+        uri: 'doc://programming'
+      });
+      mem.put(Buffer.from('Python is great for AI programming.'), {
+        uri: 'doc://ai'
+      });
+
+      // Link first doc to "language" slot
+      handle.putMemoryCard({
+        entity: 'topic',
+        slot: 'language',
+        value: 'Python',
+        sourceFrameId: 0,
+      });
+      // Link second doc to "framework" slot
+      handle.putMemoryCard({
+        entity: 'topic',
+        slot: 'framework',
+        value: 'PyTorch',
+        sourceFrameId: 1,
+      });
+
+      mem.commit();
+
+      // Filter by slot - should only find doc with "language" slot
+      const langResults = mem.find('Python', {
+        memoryFilters: [{ slot: 'language' }]
+      });
+      expect(langResults.hits.length).toBe(1);
+      expect(langResults.hits[0].uri).toBe('doc://programming');
+    });
+
+    it('should filter search results by value contains', () => {
+      const handle = (mem as any).handle;
+
+      mem.put(Buffer.from('Deep learning neural networks.'), {
+        uri: 'doc://deep-learning'
+      });
+      mem.put(Buffer.from('Machine learning basics.'), {
+        uri: 'doc://ml-basics'
+      });
+
+      handle.putMemoryCard({
+        entity: 'doc',
+        slot: 'topic',
+        value: 'Neural Networks and Deep Learning',
+        sourceFrameId: 0,
+      });
+      handle.putMemoryCard({
+        entity: 'doc',
+        slot: 'topic',
+        value: 'Introduction to ML',
+        sourceFrameId: 1,
+      });
+
+      mem.commit();
+
+      // Filter by value containing "Neural" (case-insensitive)
+      const neuralResults = mem.find('learning', {
+        memoryFilters: [{ valueContains: 'Neural' }]
+      });
+      expect(neuralResults.hits.length).toBe(1);
+      expect(neuralResults.hits[0].uri).toBe('doc://deep-learning');
+    });
+
+    it('should combine multiple filters with OR logic', () => {
+      const handle = (mem as any).handle;
+
+      mem.put(Buffer.from('Document about AI and programming.'), { uri: 'doc://ai' });
+      mem.put(Buffer.from('Document about databases and programming.'), { uri: 'doc://db' });
+      mem.put(Buffer.from('Document about networking and programming.'), { uri: 'doc://network' });
+
+      handle.putMemoryCard({ entity: 'ai', slot: 'type', value: 'tech', sourceFrameId: 0 });
+      handle.putMemoryCard({ entity: 'db', slot: 'type', value: 'tech', sourceFrameId: 1 });
+      handle.putMemoryCard({ entity: 'network', slot: 'type', value: 'tech', sourceFrameId: 2 });
+
+      mem.commit();
+
+      // Filter for ai OR db entities
+      const results = mem.find('programming', {
+        memoryFilters: [
+          { entity: 'ai' },
+          { entity: 'db' }
+        ]
+      });
+      expect(results.hits.length).toBe(2);
+      const uris = results.hits.map(h => h.uri);
+      expect(uris).toContain('doc://ai');
+      expect(uris).toContain('doc://db');
+    });
+
+    it('should return empty results when no memory cards match', () => {
+      const handle = (mem as any).handle;
+
+      mem.put(Buffer.from('Document about programming.'), { uri: 'doc://1' });
+      handle.putMemoryCard({ entity: 'existing', slot: 'topic', value: 'code', sourceFrameId: 0 });
+      mem.commit();
+
+      // Filter for non-existent entity
+      const results = mem.find('programming', {
+        memoryFilters: [{ entity: 'nonexistent' }]
+      });
+      expect(results.hits.length).toBe(0);
+    });
+  });
 });

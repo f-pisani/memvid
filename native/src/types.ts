@@ -84,6 +84,60 @@ export interface SearchResult {
   cursor?: string;
 }
 
+/**
+ * Memory kind for filtering memory cards
+ */
+export type MemoryKind = 'Fact' | 'Preference' | 'Event' | 'Profile' | 'Relationship' | 'Goal' | 'Other';
+
+/**
+ * Filter for Memory Cards to restrict search to frames matching criteria.
+ *
+ * Multiple filters in an array are ORed together - frames matching ANY filter are included.
+ * Within a single filter, all specified criteria are ANDed together.
+ *
+ * **Empty filter behavior**: An empty filter `{}` (all fields undefined) matches ALL memory cards.
+ * This is useful when you want to find only frames that have at least one memory card attached,
+ * regardless of content.
+ *
+ * @example
+ * ```typescript
+ * // Filter by entity
+ * const filter1: MemoryFilter = { entity: 'alice' };
+ *
+ * // Filter by slot and value
+ * const filter2: MemoryFilter = { slot: 'employer', valueContains: 'Anthropic' };
+ *
+ * // Filter by kind (case-insensitive: 'fact', 'Fact', 'FACT' all work)
+ * const filter3: MemoryFilter = { kind: 'Fact' };
+ *
+ * // Combined filter (all must match)
+ * const filter4: MemoryFilter = {
+ *   entity: 'alice',
+ *   slot: 'employer',
+ *   valueContains: 'Inc',
+ *   kind: 'Fact'
+ * };
+ *
+ * // Empty filter - matches frames with ANY memory card
+ * const allWithCards: MemoryFilter = {};
+ *
+ * // Use in search (OR across filters)
+ * const results = mem.find('work history', {
+ *   memoryFilters: [filter1, filter2]  // Frames matching filter1 OR filter2
+ * });
+ * ```
+ */
+export interface MemoryFilter {
+  /** Entity name (case-insensitive, "*" matches all entities) */
+  entity?: string;
+  /** Slot/attribute name (case-insensitive) */
+  slot?: string;
+  /** Substring to match in value (case-insensitive) */
+  valueContains?: string;
+  /** Memory kind to match (case-insensitive: 'Fact', 'fact', 'FACT' all work) */
+  kind?: MemoryKind;
+}
+
 /** Options for search filtering */
 export interface SearchOptions {
   /** Maximum number of results to return (default: 10) */
@@ -96,6 +150,12 @@ export interface SearchOptions {
   excludeFrameIds?: number[];
   /** Exclude frames matching these URIs from results */
   excludeUris?: string[];
+  /**
+   * Filter by Memory Cards - only return frames that have matching memory cards.
+   * Multiple filters are ORed together.
+   * Applied at query-time BEFORE search ranking for efficient filtering.
+   */
+  memoryFilters?: MemoryFilter[];
 }
 
 /** Statistics about a memvid file */

@@ -14,6 +14,35 @@ use crate::memvid::lifecycle::Memvid;
 use crate::types::{FrameId, SearchEngineKind, SearchParams, SearchRequest, SearchResponse};
 use crate::{MemvidError, Result};
 
+/// Result of intersecting a new filter with an existing candidate filter.
+#[cfg(feature = "lex")]
+enum FilterResult {
+    /// Intersection produced candidates
+    Candidates(HashSet<FrameId>),
+    /// Intersection was empty - should return early
+    Empty,
+}
+
+/// Intersect a new set of frame IDs with an existing candidate filter.
+/// Returns `FilterResult::Empty` if the result is empty (caller should return early).
+#[cfg(feature = "lex")]
+fn intersect_filter(existing: Option<HashSet<FrameId>>, new_ids: HashSet<FrameId>) -> FilterResult {
+    match existing {
+        Some(existing) => {
+            let filtered: HashSet<FrameId> = existing
+                .into_iter()
+                .filter(|id| new_ids.contains(id))
+                .collect();
+            if filtered.is_empty() {
+                FilterResult::Empty
+            } else {
+                FilterResult::Candidates(filtered)
+            }
+        }
+        None => FilterResult::Candidates(new_ids),
+    }
+}
+
 mod api;
 mod builders;
 #[cfg(feature = "lex")]
@@ -108,39 +137,28 @@ impl Memvid {
         #[cfg(feature = "temporal_track")]
         if let Some(ref temporal_filter) = request.temporal {
             if !temporal_filter.is_empty() {
-                match time_filter::frame_ids_for_temporal_filter(self, temporal_filter)? {
-                    Some(ids) => {
-                        if ids.is_empty() {
-                            let elapsed = start_time.elapsed().as_millis();
+                if let Some(ids) =
+                    time_filter::frame_ids_for_temporal_filter(self, temporal_filter)?
+                {
+                    if ids.is_empty() {
+                        return Ok(empty_search_response(
+                            request.query.clone(),
+                            params.clone(),
+                            start_time.elapsed().as_millis(),
+                            SearchEngineKind::Tantivy,
+                        ));
+                    }
+                    match intersect_filter(candidate_filter, ids.into_iter().collect()) {
+                        FilterResult::Empty => {
                             return Ok(empty_search_response(
                                 request.query.clone(),
                                 params.clone(),
-                                elapsed,
+                                start_time.elapsed().as_millis(),
                                 SearchEngineKind::Tantivy,
                             ));
                         }
-                        let new_set: HashSet<FrameId> = ids.into_iter().collect();
-                        candidate_filter = match candidate_filter {
-                            Some(existing) => {
-                                let filtered: HashSet<FrameId> = existing
-                                    .into_iter()
-                                    .filter(|id| new_set.contains(id))
-                                    .collect();
-                                if filtered.is_empty() {
-                                    let elapsed = start_time.elapsed().as_millis();
-                                    return Ok(empty_search_response(
-                                        request.query.clone(),
-                                        params.clone(),
-                                        elapsed,
-                                        SearchEngineKind::Tantivy,
-                                    ));
-                                }
-                                Some(filtered)
-                            }
-                            None => Some(new_set),
-                        };
+                        FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
                     }
-                    None => {}
                 }
             }
         }
@@ -149,34 +167,63 @@ impl Memvid {
         if request.as_of_frame.is_some() || request.as_of_ts.is_some() {
             let replay_ids = self.get_replay_frame_ids(&request)?;
             if replay_ids.is_empty() {
-                let elapsed = start_time.elapsed().as_millis();
                 return Ok(empty_search_response(
                     request.query.clone(),
                     params.clone(),
-                    elapsed,
+                    start_time.elapsed().as_millis(),
                     SearchEngineKind::Tantivy,
                 ));
             }
-            let replay_set: HashSet<FrameId> = replay_ids.into_iter().collect();
-            candidate_filter = match candidate_filter {
-                Some(existing) => {
-                    let filtered: HashSet<FrameId> = existing
-                        .into_iter()
-                        .filter(|id| replay_set.contains(id))
-                        .collect();
-                    if filtered.is_empty() {
-                        let elapsed = start_time.elapsed().as_millis();
-                        return Ok(empty_search_response(
-                            request.query.clone(),
-                            params.clone(),
-                            elapsed,
-                            SearchEngineKind::Tantivy,
-                        ));
-                    }
-                    Some(filtered)
+            match intersect_filter(candidate_filter, replay_ids.into_iter().collect()) {
+                FilterResult::Empty => {
+                    return Ok(empty_search_response(
+                        request.query.clone(),
+                        params.clone(),
+                        start_time.elapsed().as_millis(),
+                        SearchEngineKind::Tantivy,
+                    ));
                 }
-                None => Some(replay_set),
-            };
+                FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
+            }
+        }
+
+        // MEMORY FILTER: Restrict to frames matching Memory Card criteria
+        if !request.memory_filters.is_empty() {
+            let memory_start = Instant::now();
+            let memory_frame_ids: HashSet<FrameId> = request
+                .memory_filters
+                .iter()
+                .flat_map(|filter| self.find_memory_cards_matching_filter(filter))
+                .map(|card| card.source_frame_id)
+                .collect();
+
+            tracing::debug!(
+                memory_filters = request.memory_filters.len(),
+                matching_frames = memory_frame_ids.len(),
+                memory_filter_time_us = memory_start.elapsed().as_micros(),
+                "memory filter applied"
+            );
+
+            if memory_frame_ids.is_empty() {
+                return Ok(empty_search_response(
+                    request.query.clone(),
+                    params.clone(),
+                    start_time.elapsed().as_millis(),
+                    SearchEngineKind::Tantivy,
+                ));
+            }
+
+            match intersect_filter(candidate_filter, memory_frame_ids) {
+                FilterResult::Empty => {
+                    return Ok(empty_search_response(
+                        request.query.clone(),
+                        params.clone(),
+                        start_time.elapsed().as_millis(),
+                        SearchEngineKind::Tantivy,
+                    ));
+                }
+                FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
+            }
         }
 
         // SKETCH PRE-FILTER: Use sketch track for fast candidate generation if available

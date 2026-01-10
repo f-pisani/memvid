@@ -330,6 +330,28 @@ impl Memvid {
         self.memories_track.entities()
     }
 
+    /// Find memory cards matching a filter.
+    ///
+    /// This is used for query-time filtering of search results based on
+    /// Memory Card criteria.
+    ///
+    /// # Arguments
+    /// * `filter` - The filter criteria
+    ///
+    /// # Returns
+    /// All memory cards matching the filter.
+    #[must_use]
+    pub fn find_memory_cards_matching_filter(
+        &self,
+        filter: &crate::types::MemoryFilter,
+    ) -> Vec<&MemoryCard> {
+        self.memories_track
+            .cards()
+            .iter()
+            .filter(|card| filter.matches(card))
+            .collect()
+    }
+
     /// Clear all memory cards and enrichment records.
     ///
     /// This is destructive and cannot be undone.
@@ -887,5 +909,288 @@ mod tests {
             .unwrap();
 
         assert!(memvid.put_memory_card(invalid_card).is_err());
+    }
+
+    #[test]
+    fn test_memory_filter_by_entity() {
+        use crate::types::MemoryFilter;
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        // Add cards for different entities
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("employer")
+            .value("Anthropic")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("bob")
+            .slot("employer")
+            .value("OpenAI")
+            .source(1, None)
+            .engine("test", "1.0.0")
+            .build(1)
+            .unwrap();
+        memvid.put_memory_card(card2).unwrap();
+
+        // Filter by entity "alice"
+        let filter = MemoryFilter::entity("alice");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].entity, "alice");
+        assert_eq!(matches[0].value, "Anthropic");
+
+        // Case-insensitive entity filter
+        let filter = MemoryFilter::entity("ALICE");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].entity, "alice");
+    }
+
+    #[test]
+    fn test_memory_filter_by_slot() {
+        use crate::types::MemoryFilter;
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("user")
+            .slot("employer")
+            .value("Anthropic")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("user")
+            .slot("location")
+            .value("San Francisco")
+            .source(1, None)
+            .engine("test", "1.0.0")
+            .build(1)
+            .unwrap();
+        memvid.put_memory_card(card2).unwrap();
+
+        // Filter by slot "employer"
+        let filter = MemoryFilter::slot("employer");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].slot, "employer");
+
+        // Filter by slot "location"
+        let filter = MemoryFilter::slot("LOCATION"); // case-insensitive
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].slot, "location");
+    }
+
+    #[test]
+    fn test_memory_filter_by_value_contains() {
+        use crate::types::MemoryFilter;
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("user")
+            .slot("employer")
+            .value("Anthropic Inc")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("user")
+            .slot("location")
+            .value("San Francisco Bay Area")
+            .source(1, None)
+            .engine("test", "1.0.0")
+            .build(1)
+            .unwrap();
+        memvid.put_memory_card(card2).unwrap();
+
+        // Filter by value containing "Anthropic"
+        let filter = MemoryFilter::default().with_value("Anthropic");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].value.contains("Anthropic"));
+
+        // Case-insensitive value filter
+        let filter = MemoryFilter::default().with_value("SAN FRANCISCO");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert!(matches[0].value.contains("San Francisco"));
+    }
+
+    #[test]
+    fn test_memory_filter_by_kind() {
+        use crate::types::{MemoryFilter, MemoryKind};
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("user")
+            .slot("employer")
+            .value("Anthropic")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .preference()
+            .entity("user")
+            .slot("hobby")
+            .value("Programming")
+            .source(1, None)
+            .engine("test", "1.0.0")
+            .build(1)
+            .unwrap();
+        memvid.put_memory_card(card2).unwrap();
+
+        // Filter by kind Fact
+        let filter = MemoryFilter::default().with_kind(MemoryKind::Fact);
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].kind, MemoryKind::Fact);
+
+        // Filter by kind Preference
+        let filter = MemoryFilter::default().with_kind(MemoryKind::Preference);
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].kind, MemoryKind::Preference);
+    }
+
+    #[test]
+    fn test_memory_filter_combined() {
+        use crate::types::{MemoryFilter, MemoryKind};
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        // Alice's employer
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("employer")
+            .value("Anthropic")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card1).unwrap();
+
+        // Bob's employer
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("bob")
+            .slot("employer")
+            .value("Anthropic")
+            .source(1, None)
+            .engine("test", "1.0.0")
+            .build(1)
+            .unwrap();
+        memvid.put_memory_card(card2).unwrap();
+
+        // Alice's location
+        let card3 = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("location")
+            .value("San Francisco")
+            .source(2, None)
+            .engine("test", "1.0.0")
+            .build(2)
+            .unwrap();
+        memvid.put_memory_card(card3).unwrap();
+
+        // Combined filter: alice + employer
+        let filter = MemoryFilter::entity_slot("alice", "employer");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].entity, "alice");
+        assert_eq!(matches[0].slot, "employer");
+
+        // Combined filter: entity + slot + value
+        let filter = MemoryFilter::entity_slot("alice", "employer").with_value("Anthro");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 1);
+
+        // Combined filter: wildcard entity + slot
+        let filter = MemoryFilter::entity("*").with_kind(MemoryKind::Fact);
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert_eq!(matches.len(), 3); // All facts
+    }
+
+    #[test]
+    fn test_memory_filter_no_matches() {
+        use crate::types::MemoryFilter;
+
+        let temp = NamedTempFile::new().unwrap();
+        let path = temp.path();
+        std::fs::remove_file(path).ok();
+
+        let mut memvid = Memvid::create(path).unwrap();
+
+        let card = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("employer")
+            .value("Anthropic")
+            .source(0, None)
+            .engine("test", "1.0.0")
+            .build(0)
+            .unwrap();
+        memvid.put_memory_card(card).unwrap();
+
+        // Filter for non-existent entity
+        let filter = MemoryFilter::entity("charlie");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert!(matches.is_empty());
+
+        // Filter for non-existent slot
+        let filter = MemoryFilter::slot("hobby");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert!(matches.is_empty());
+
+        // Filter for non-matching value
+        let filter = MemoryFilter::default().with_value("OpenAI");
+        let matches = memvid.find_memory_cards_matching_filter(&filter);
+        assert!(matches.is_empty());
     }
 }

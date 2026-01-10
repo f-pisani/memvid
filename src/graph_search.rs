@@ -327,6 +327,7 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
                 no_sketch: false,
                 exclude_frame_ids: Vec::new(),
                 exclude_uris: Vec::new(),
+                memory_filters: Vec::new(),
             };
             let response = memvid.search(request)?;
             Ok(response
@@ -393,6 +394,7 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
                     no_sketch: false,
                     exclude_frame_ids: Vec::new(),
                     exclude_uris: Vec::new(),
+                    memory_filters: Vec::new(),
                 };
                 let response = memvid.search(request)?;
                 return Ok(response

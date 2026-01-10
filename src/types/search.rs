@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use super::common::FrameId;
 #[cfg(feature = "temporal_track")]
 use super::frame::AnchorSource;
+use super::memory_card::MemoryKind;
 #[cfg(feature = "temporal_track")]
 use super::temporal::{TemporalFilter, TemporalMentionFlags, TemporalMentionKind};
 
@@ -32,6 +33,141 @@ pub enum SearchEngineKind {
 impl Default for SearchEngineKind {
     fn default() -> Self {
         Self::LexFallback
+    }
+}
+
+/// Filter search results based on Memory Card criteria.
+///
+/// Memory Cards are structured facts (entity-slot-value triples) extracted from frames.
+/// This filter restricts search to frames that have matching Memory Cards.
+///
+/// # Example
+/// ```ignore
+/// // Find frames about suspension causes
+/// MemoryFilter {
+///     entity: Some("suspension".into()),
+///     slot: Some("cause".into()),
+///     value_contains: None,  // Any cause
+///     kind: None,
+/// }
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryFilter {
+    /// Filter by entity name (exact match, case-insensitive).
+    /// Use "*" to match any entity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entity: Option<String>,
+
+    /// Filter by slot/attribute name (exact match, case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slot: Option<String>,
+
+    /// Filter by value (substring match, case-insensitive).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value_contains: Option<String>,
+
+    /// Filter by memory kind (Fact, Preference, Event, etc.).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<MemoryKind>,
+}
+
+impl MemoryFilter {
+    /// Create an empty filter that matches ALL memory cards.
+    ///
+    /// Useful when you want to filter search results to only include
+    /// frames that have at least one memory card, regardless of content.
+    ///
+    /// # Example
+    /// ```ignore
+    /// // Find only frames that have any memory card attached
+    /// let filter = MemoryFilter::all();
+    /// ```
+    #[must_use]
+    pub fn all() -> Self {
+        Self::default()
+    }
+
+    /// Create a new filter for a specific entity.
+    #[must_use]
+    pub fn entity(entity: impl Into<String>) -> Self {
+        Self {
+            entity: Some(entity.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a new filter for a specific slot across all entities.
+    #[must_use]
+    pub fn slot(slot: impl Into<String>) -> Self {
+        Self {
+            slot: Some(slot.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a filter for entity + slot combination.
+    #[must_use]
+    pub fn entity_slot(entity: impl Into<String>, slot: impl Into<String>) -> Self {
+        Self {
+            entity: Some(entity.into()),
+            slot: Some(slot.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Add a value substring filter.
+    #[must_use]
+    pub fn with_value(mut self, value: impl Into<String>) -> Self {
+        self.value_contains = Some(value.into());
+        self
+    }
+
+    /// Add a kind filter.
+    #[must_use]
+    pub fn with_kind(mut self, kind: MemoryKind) -> Self {
+        self.kind = Some(kind);
+        self
+    }
+
+    /// Check if a memory card matches this filter.
+    ///
+    /// All specified criteria must match (AND logic).
+    /// Unspecified criteria (None) match everything.
+    #[must_use]
+    pub fn matches(&self, card: &super::memory_card::MemoryCard) -> bool {
+        // Entity filter: "*" matches all, otherwise case-insensitive match
+        if let Some(ref entity) = self.entity {
+            if entity != "*" && !card.entity.eq_ignore_ascii_case(entity) {
+                return false;
+            }
+        }
+
+        // Slot filter: case-insensitive match
+        if let Some(ref slot) = self.slot {
+            if !card.slot.eq_ignore_ascii_case(slot) {
+                return false;
+            }
+        }
+
+        // Value filter: case-insensitive substring match
+        if let Some(ref value) = self.value_contains {
+            if !card
+                .value
+                .to_ascii_lowercase()
+                .contains(&value.to_ascii_lowercase())
+            {
+                return false;
+            }
+        }
+
+        // Kind filter: exact match
+        if let Some(ref kind) = self.kind {
+            if card.kind != *kind {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
@@ -71,6 +207,11 @@ pub struct SearchRequest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     /// Exclude frames matching these URIs from results.
     pub exclude_uris: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Filter to frames matching these Memory Card criteria.
+    /// Multiple filters are combined with OR (any match includes the frame).
+    /// Applied at query time - only matching frames are searched.
+    pub memory_filters: Vec<MemoryFilter>,
 }
 
 /// A single ranked hit with snippet metadata.

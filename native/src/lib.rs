@@ -369,6 +369,35 @@ pub struct SearchResult {
     pub cursor: Option<String>,
 }
 
+/// Memory filter for restricting search to frames with matching Memory Cards.
+///
+/// Multiple filters in an array are ORed together - frames matching ANY filter are included.
+/// Within a single filter, all specified criteria are ANDed together.
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct JsMemoryFilter {
+    /// Entity name (case-insensitive, "*" matches all entities)
+    pub entity: Option<String>,
+    /// Slot/attribute name (case-insensitive)
+    pub slot: Option<String>,
+    /// Substring to match in value (case-insensitive)
+    pub value_contains: Option<String>,
+    /// Memory kind to match: "Fact", "Preference", "Event", "Profile", "Relationship", "Goal", "Other"
+    pub kind: Option<String>,
+}
+
+impl JsMemoryFilter {
+    /// Convert to core MemoryFilter
+    fn to_core(&self) -> memvid_core::types::MemoryFilter {
+        memvid_core::types::MemoryFilter {
+            entity: self.entity.clone(),
+            slot: self.slot.clone(),
+            value_contains: self.value_contains.clone(),
+            kind: self.kind.as_ref().and_then(|k| MemoryKind::try_from_str(k)),
+        }
+    }
+}
+
 /// Options for hybrid search
 #[napi(object)]
 #[derive(Debug, Clone, Default)]
@@ -931,7 +960,7 @@ impl MemvidHandle {
 
     /// Search for documents
     ///
-    /// Supports filtering by URI, scope, and exclusions.
+    /// Supports filtering by URI, scope, exclusions, and memory filters.
     #[napi]
     pub fn find(
         &self,
@@ -941,6 +970,7 @@ impl MemvidHandle {
         scope: Option<String>,
         exclude_ids: Option<Vec<i64>>,
         exclude_uris: Option<Vec<String>>,
+        memory_filters: Option<Vec<JsMemoryFilter>>,
     ) -> napi::Result<SearchResult> {
         // Validate limit before entering closure to avoid move issues
         let top_k_usize = i32_to_usize(limit.unwrap_or(10))?;
@@ -951,6 +981,12 @@ impl MemvidHandle {
             .filter_map(|id| if id >= 0 { Some(id as u64) } else { None })
             .collect();
         let exclude_uris = exclude_uris.unwrap_or_default();
+        // Convert JsMemoryFilter to core MemoryFilter
+        let memory_filters_core: Vec<memvid_core::types::MemoryFilter> = memory_filters
+            .unwrap_or_default()
+            .iter()
+            .map(|f| f.to_core())
+            .collect();
 
         self.with_memvid(move |memvid| {
             let request = memvid_core::SearchRequest {
@@ -965,6 +1001,7 @@ impl MemvidHandle {
                 no_sketch: false,
                 exclude_frame_ids,
                 exclude_uris,
+                memory_filters: memory_filters_core,
             };
 
             let response = memvid.search(request).map_err(memvid_to_napi_error)?;
