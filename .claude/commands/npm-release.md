@@ -112,3 +112,12 @@ You can also manually trigger via workflow_dispatch:
 ```bash
 gh workflow run npm-publish.yml
 ```
+
+### About semantic versionning
+Given a version number vMAJOR.MINOR.PATCH, increment the:
+
+- MAJOR version when you make incompatible API changes
+- MINOR version when you add functionality in a backward compatible manner
+- PATCH version when you make backward compatible bug fixes
+
+When a version implies releasing a new MAJOR version you should ALWAYS use AskUserQuestion tool to ask the user if he agree to create a new major version or break the rules and increase the MINOR.
