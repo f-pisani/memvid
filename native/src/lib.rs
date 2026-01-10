@@ -22,7 +22,6 @@ use memvid_core::types::{
 };
 use memvid_core::Memvid;
 
-#[cfg(feature = "encryption")]
 use memvid_core::encryption::{lock_file, unlock_file};
 
 // ============================================================================
@@ -1210,11 +1209,7 @@ impl MemvidHandle {
             }
 
             let frame_id = memvid
-                .put_with_embedding_and_options(
-                    &content_vec,
-                    embedding_f32.clone(),
-                    put_opts.build(),
-                )
+                .put_with_embedding_and_options(&content_vec, embedding_f32, put_opts.build())
                 .map_err(memvid_to_napi_error)?;
 
             u64_to_i64(frame_id)
@@ -1859,13 +1854,21 @@ pub fn version() -> String {
 ///
 /// Creates a .mv2e encrypted file from the input .mv2 file.
 /// Returns the path to the encrypted file.
-///
-/// Requires the 'encryption' feature to be enabled.
-#[cfg(feature = "encryption")]
 #[napi]
 pub fn lock(path: String, password: String) -> napi::Result<String> {
     catch_panic(AssertUnwindSafe(|| {
-        let output_path = lock_file(&path, None, password.as_bytes()).map_err(|e| {
+        // Validate password is not empty
+        if password.is_empty() {
+            return Err(napi::Error::from_reason(
+                "[INVALID_INPUT] Password cannot be empty",
+            ));
+        }
+
+        // Validate the input path
+        let validated_path = validate_path_for_open(&path)?;
+        let path_str = validated_path.to_string_lossy().to_string();
+
+        let output_path = lock_file(&path_str, None, password.as_bytes()).map_err(|e| {
             napi::Error::from_reason(format!("[ENCRYPTION_ERROR] Failed to lock file: {}", e))
         })?;
 
@@ -1873,43 +1876,70 @@ pub fn lock(path: String, password: String) -> napi::Result<String> {
     }))
 }
 
-/// Lock (encrypt) a memvid file with a password
-///
-/// Returns an error when encryption feature is not enabled.
-#[cfg(not(feature = "encryption"))]
-#[napi]
-pub fn lock(_path: String, _password: String) -> napi::Result<String> {
-    Err(napi::Error::from_reason(
-        "[FEATURE_UNAVAILABLE] Encryption feature is not enabled. Rebuild with --features encryption",
-    ))
-}
-
 /// Unlock (decrypt) a memvid file
 ///
 /// Decrypts a .mv2e encrypted file and returns the path to the decrypted .mv2 file.
-///
-/// Requires the 'encryption' feature to be enabled.
-#[cfg(feature = "encryption")]
 #[napi]
 pub fn unlock(path: String, password: String) -> napi::Result<String> {
     catch_panic(AssertUnwindSafe(|| {
+        // Validate password is not empty
+        if password.is_empty() {
+            return Err(napi::Error::from_reason(
+                "[INVALID_INPUT] Password cannot be empty",
+            ));
+        }
+
+        // Basic path validation (skip extension check since .mv2e files are expected)
+        if path.contains('\0') {
+            return Err(napi::Error::from_reason(
+                "[INVALID_PATH] Path contains null bytes",
+            ));
+        }
+
+        let path_buf = std::path::PathBuf::from(&path);
+
+        // Check for path traversal
+        for component in path_buf.components() {
+            if let std::path::Component::ParentDir = component {
+                return Err(napi::Error::from_reason(
+                    "[INVALID_PATH] Path traversal not allowed: '..' in path",
+                ));
+            }
+        }
+
+        // Verify the file exists and is not a symlink to something unexpected
+        match std::fs::canonicalize(&path_buf) {
+            Ok(canonical) => {
+                // Verify the resolved path has .mv2e extension
+                match canonical.extension() {
+                    Some(ext) if ext == "mv2e" => {}
+                    _ => {
+                        return Err(napi::Error::from_reason(
+                            "[INVALID_PATH] File must have .mv2e extension for unlock",
+                        ));
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Err(napi::Error::from_reason(format!(
+                    "[IO_ERROR] File not found: {}",
+                    path
+                )));
+            }
+            Err(e) => {
+                return Err(napi::Error::from_reason(format!(
+                    "[IO_ERROR] Cannot access file: {}",
+                    e
+                )));
+            }
+        }
+
         let output_path = unlock_file(&path, None, password.as_bytes()).map_err(|e| {
             napi::Error::from_reason(format!("[ENCRYPTION_ERROR] Failed to unlock file: {}", e))
         })?;
 
         Ok(output_path.to_string_lossy().to_string())
     }))
-}
-
-/// Unlock (decrypt) a memvid file
-///
-/// Returns an error when encryption feature is not enabled.
-#[cfg(not(feature = "encryption"))]
-#[napi]
-pub fn unlock(_path: String, _password: String) -> napi::Result<String> {
-    Err(napi::Error::from_reason(
-        "[FEATURE_UNAVAILABLE] Encryption feature is not enabled. Rebuild with --features encryption",
-    ))
 }
 
 // ============================================================================
