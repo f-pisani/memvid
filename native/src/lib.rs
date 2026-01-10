@@ -10,6 +10,7 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 
+use memvid_core::graph_search::{hybrid_search as rust_graph_hybrid_search, QueryPlanner};
 use memvid_core::reader::{DocumentFormat, ReaderHint, ReaderRegistry};
 use memvid_core::table::{
     export_to_csv, export_to_json, extract_tables_from_pdf, get_table as rust_get_table,
@@ -17,12 +18,33 @@ use memvid_core::table::{
     TableExtractionOptions as RustTableExtractionOptions,
 };
 use memvid_core::types::{
-    AdaptiveConfig, CutoffStrategy, DoctorOptions as RustDoctorOptions, DoctorStatus, MemoryCard,
-    MemoryCardBuilder, MemoryKind,
+    AdaptiveConfig, AskMode as RustAskMode, AskRequest as RustAskRequest, CutoffStrategy,
+    DoctorOptions as RustDoctorOptions, DoctorStatus, MemoryCard, MemoryCardBuilder, MemoryKind,
+    VecEmbedder,
 };
 use memvid_core::Memvid;
 
 use memvid_core::encryption::{lock_file, unlock_file};
+use memvid_core::pii;
+
+// ============================================================================
+// Noop Embedder (for lex-only ask)
+// ============================================================================
+
+/// A no-op embedder used when calling ask() in lex-only mode.
+/// This type is never instantiated - we always pass None.
+struct NoopEmbedder;
+
+impl VecEmbedder for NoopEmbedder {
+    fn embed_query(&self, _text: &str) -> memvid_core::Result<Vec<f32>> {
+        // Should never be called since we pass None
+        Err(memvid_core::MemvidError::VecNotEnabled)
+    }
+
+    fn embedding_dimension(&self) -> usize {
+        0
+    }
+}
 
 // ============================================================================
 // Error Handling
@@ -399,6 +421,176 @@ pub struct AdaptiveSearchResult {
 }
 
 // ============================================================================
+// Ask (RAG Q&A) Types
+// ============================================================================
+
+/// Input for ask (RAG Q&A) request
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct AskRequestInput {
+    /// The question to ask
+    pub question: String,
+    /// Maximum number of context chunks to retrieve (default: 5)
+    pub top_k: Option<i32>,
+    /// Maximum characters per snippet (default: 500)
+    pub snippet_chars: Option<i32>,
+    /// Filter to specific URI
+    pub uri: Option<String>,
+    /// Filter to URI scope (prefix match)
+    pub scope: Option<String>,
+    /// Pagination cursor
+    pub cursor: Option<String>,
+    /// Start timestamp filter (Unix epoch seconds)
+    pub start: Option<i64>,
+    /// End timestamp filter (Unix epoch seconds)
+    pub end: Option<i64>,
+    /// If true, only return context without synthesized answer
+    pub context_only: Option<bool>,
+    /// Retrieval mode: "lex", "sem", or "hybrid" (default: "lex" for NAPI since no embedder)
+    pub mode: Option<String>,
+    /// Replay: Filter to frames with id <= as_of_frame (time-travel view)
+    pub as_of_frame: Option<i64>,
+    /// Replay: Filter to frames with timestamp <= as_of_ts (time-travel view)
+    pub as_of_ts: Option<i64>,
+}
+
+/// Citation pointing back into the memory
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskCitationResult {
+    /// 1-based citation index
+    pub index: i64,
+    /// Frame ID of the source
+    pub frame_id: i64,
+    /// URI of the source
+    pub uri: String,
+    /// Byte range of the chunk in the source (start)
+    pub chunk_range_start: Option<i64>,
+    /// Byte range of the chunk in the source (end)
+    pub chunk_range_end: Option<i64>,
+    /// Relevance score
+    pub score: Option<f64>,
+}
+
+/// Context fragment used for answer synthesis
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskContextFragmentResult {
+    /// Rank in the result set (1-based)
+    pub rank: i64,
+    /// Frame ID of the source
+    pub frame_id: i64,
+    /// URI of the source
+    pub uri: String,
+    /// Title of the source document
+    pub title: Option<String>,
+    /// Relevance score
+    pub score: Option<f64>,
+    /// Number of keyword matches
+    pub matches: i64,
+    /// Byte range in the source (start)
+    pub range_start: Option<i64>,
+    /// Byte range in the source (end)
+    pub range_end: Option<i64>,
+    /// Chunk byte range (start)
+    pub chunk_range_start: Option<i64>,
+    /// Chunk byte range (end)
+    pub chunk_range_end: Option<i64>,
+    /// The text content
+    pub text: String,
+}
+
+/// Statistics from ask operation
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskStatsResult {
+    /// Time spent retrieving context in milliseconds
+    pub retrieval_ms: i64,
+    /// Time spent synthesizing the answer in milliseconds
+    pub synthesis_ms: i64,
+    /// End-to-end latency in milliseconds
+    pub latency_ms: i64,
+}
+
+/// Response from ask (RAG Q&A)
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AskResponseOutput {
+    /// The original question
+    pub question: String,
+    /// Retrieval mode used: "lex", "sem", or "hybrid"
+    pub mode: String,
+    /// Retriever used: "lex", "semantic", "hybrid", "lex_fallback", or "timeline_fallback"
+    pub retriever: String,
+    /// Whether this was a context-only request
+    pub context_only: bool,
+    /// Synthesized answer (if context_only is false)
+    pub answer: Option<String>,
+    /// Citations pointing to source frames
+    pub citations: Vec<AskCitationResult>,
+    /// Context fragments used for synthesis
+    pub context_fragments: Vec<AskContextFragmentResult>,
+    /// Concatenated context text for LLM consumption
+    pub context: String,
+    /// Search hits (for detailed access)
+    pub hits: Vec<SearchHit>,
+    /// Total hits found
+    pub total_hits: i64,
+    /// Timing statistics
+    pub stats: AskStatsResult,
+}
+
+// ============================================================================
+// Graph Search Types
+// ============================================================================
+
+/// Options for graph search
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct GraphSearchOptions {
+    /// Maximum number of results to return
+    pub top_k: Option<i32>,
+    /// Maximum characters for snippets
+    pub snippet_chars: Option<i32>,
+    /// URI scope filter (prefix match)
+    pub scope: Option<String>,
+}
+
+/// A single graph search hit
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSearchHit {
+    /// Frame ID
+    pub frame_id: i64,
+    /// Combined relevance score (graph + vector)
+    pub score: f64,
+    /// Graph pattern match score (0.0-1.0)
+    pub graph_score: f64,
+    /// Vector/lexical similarity score
+    pub vector_score: f64,
+    /// Entity that matched the graph pattern (if any)
+    pub matched_entity: Option<String>,
+    /// Frame content preview
+    pub preview: Option<String>,
+}
+
+/// Result of graph search including execution plan info
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphSearchResult {
+    /// Search hits
+    pub hits: Vec<GraphSearchHit>,
+    /// Execution plan used: "vector_only", "graph_only", or "hybrid"
+    pub plan_type: String,
+    /// Whether the plan used graph patterns
+    pub uses_graph: bool,
+    /// Whether the plan used vector/lexical search
+    pub uses_vector: bool,
+    /// Total hits found
+    pub total_hits: i64,
+}
+
+// ============================================================================
 // Memory Card Types
 // ============================================================================
 
@@ -443,6 +635,24 @@ pub struct MemoryCardResult {
 pub struct MemoriesStatsResult {
     pub card_count: i64,
     pub entity_count: i64,
+}
+
+// ============================================================================
+// Enrichment Stats
+// ============================================================================
+
+/// Statistics about enrichment state
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrichmentStatsResult {
+    /// Total active frames
+    pub total_frames: i64,
+    /// Frames that have been fully enriched
+    pub enriched_frames: i64,
+    /// Frames pending enrichment
+    pub pending_frames: i64,
+    /// Frames that are searchable but not enriched (skimmed)
+    pub skimmed_frames: i64,
 }
 
 // ============================================================================
@@ -1084,6 +1294,240 @@ impl MemvidHandle {
         })
     }
 
+    /// Graph search combining memory cards with vector/lexical search
+    ///
+    /// Uses QueryPlanner to analyze the query and determine the best execution strategy:
+    /// - For simple queries: vector-only search (falls back to lexical)
+    /// - For queries referencing entities: hybrid search combining memory cards and lexical search
+    ///
+    /// This provides intelligent retrieval that leverages structured knowledge (memory cards)
+    /// when the query references known entities.
+    #[napi]
+    pub fn graph_search(
+        &self,
+        query: String,
+        options: Option<GraphSearchOptions>,
+    ) -> napi::Result<GraphSearchResult> {
+        let opts = options.unwrap_or_default();
+        let top_k = i32_to_usize(opts.top_k.unwrap_or(10))?;
+
+        self.with_memvid(move |memvid| {
+            // Create query planner and analyze the query
+            let planner = QueryPlanner::new();
+            let plan = planner.plan(&query, top_k);
+
+            // Capture plan info before moving
+            let uses_graph = plan.uses_graph();
+            let uses_vector = plan.uses_vector();
+            let plan_type = match &plan {
+                memvid_core::types::QueryPlan::VectorOnly { .. } => "vector_only".to_string(),
+                memvid_core::types::QueryPlan::GraphOnly { .. } => "graph_only".to_string(),
+                memvid_core::types::QueryPlan::Hybrid { .. } => "hybrid".to_string(),
+            };
+
+            // Execute the hybrid search using the graph_search module
+            let hybrid_hits =
+                rust_graph_hybrid_search(memvid, &plan).map_err(memvid_to_napi_error)?;
+
+            // Convert HybridSearchHit results to NAPI GraphSearchHit
+            let hits: napi::Result<Vec<GraphSearchHit>> = hybrid_hits
+                .iter()
+                .map(|h| {
+                    Ok(GraphSearchHit {
+                        frame_id: u64_to_i64(h.frame_id)?,
+                        score: h.score as f64,
+                        graph_score: h.graph_score as f64,
+                        vector_score: h.vector_score as f64,
+                        matched_entity: h.matched_entity.clone(),
+                        preview: h.preview.clone(),
+                    })
+                })
+                .collect();
+
+            let hits = hits?;
+            let total_hits = hits.len() as i64;
+
+            Ok(GraphSearchResult {
+                hits,
+                plan_type,
+                uses_graph,
+                uses_vector,
+                total_hits,
+            })
+        })
+    }
+
+    /// Ask a question (RAG Q&A with retrieval)
+    ///
+    /// Retrieves relevant context from the memory and optionally synthesizes an answer.
+    /// This is the primary interface for retrieval-augmented generation.
+    ///
+    /// Note: For the NAPI binding, only lexical mode ("lex") is supported since
+    /// semantic/hybrid modes require an embedder. The `mode` field in options is
+    /// ignored and defaults to "lex".
+    ///
+    /// If `context_only` is true, only retrieves context without synthesizing an answer.
+    /// The caller can then use the context with their own LLM.
+    #[napi]
+    pub fn ask(&self, request: AskRequestInput) -> napi::Result<AskResponseOutput> {
+        // Validate and convert parameters
+        let top_k = i32_to_usize(request.top_k.unwrap_or(5))?;
+        let snippet_chars = i32_to_usize(request.snippet_chars.unwrap_or(500))?;
+        let context_only = request.context_only.unwrap_or(true); // Default to context_only for NAPI
+
+        // Parse mode (only lex is supported without embedder)
+        let mode = match request.mode.as_deref() {
+            Some("lex") | None => RustAskMode::Lex,
+            Some("sem") | Some("semantic") => {
+                return Err(napi::Error::from_reason(
+                    "[INVALID_INPUT] Semantic mode requires an embedder. Use 'lex' mode or call ask with pre-computed embeddings.",
+                ));
+            }
+            Some("hybrid") => {
+                return Err(napi::Error::from_reason(
+                    "[INVALID_INPUT] Hybrid mode requires an embedder. Use 'lex' mode or call ask with pre-computed embeddings.",
+                ));
+            }
+            Some(unknown) => {
+                return Err(napi::Error::from_reason(format!(
+                    "[INVALID_INPUT] Unknown mode: '{}'. Valid modes: lex, sem, hybrid",
+                    unknown
+                )));
+            }
+        };
+
+        // Convert as_of_frame from i64 to u64
+        let as_of_frame = request
+            .as_of_frame
+            .map(|id| if id >= 0 { id as u64 } else { 0 });
+
+        // Build Rust AskRequest
+        let rust_request = RustAskRequest {
+            question: request.question,
+            top_k,
+            snippet_chars,
+            uri: request.uri,
+            scope: request.scope,
+            cursor: request.cursor,
+            start: request.start,
+            end: request.end,
+            #[cfg(feature = "temporal_track")]
+            temporal: None,
+            context_only,
+            mode,
+            as_of_frame,
+            as_of_ts: request.as_of_ts,
+            adaptive: None, // Could add adaptive config support in the future
+        };
+
+        self.with_memvid(move |memvid| {
+            // Call ask without embedder (lex-only mode)
+            let response = memvid
+                .ask::<NoopEmbedder>(rust_request, None)
+                .map_err(memvid_to_napi_error)?;
+
+            // Convert citations
+            let citations: napi::Result<Vec<AskCitationResult>> = response
+                .citations
+                .into_iter()
+                .map(|c| {
+                    Ok(AskCitationResult {
+                        index: c.index as i64,
+                        frame_id: u64_to_i64(c.frame_id)?,
+                        uri: c.uri,
+                        chunk_range_start: c.chunk_range.map(|(start, _)| start as i64),
+                        chunk_range_end: c.chunk_range.map(|(_, end)| end as i64),
+                        score: c.score.map(|s| s as f64),
+                    })
+                })
+                .collect();
+
+            // Convert context fragments
+            let context_fragments: napi::Result<Vec<AskContextFragmentResult>> = response
+                .context_fragments
+                .into_iter()
+                .map(|f| {
+                    Ok(AskContextFragmentResult {
+                        rank: f.rank as i64,
+                        frame_id: u64_to_i64(f.frame_id)?,
+                        uri: f.uri,
+                        title: f.title,
+                        score: f.score.map(|s| s as f64),
+                        matches: f.matches as i64,
+                        range_start: f.range.map(|(start, _)| start as i64),
+                        range_end: f.range.map(|(_, end)| end as i64),
+                        chunk_range_start: f.chunk_range.map(|(start, _)| start as i64),
+                        chunk_range_end: f.chunk_range.map(|(_, end)| end as i64),
+                        text: f.text,
+                    })
+                })
+                .collect();
+
+            // Convert search hits
+            let hits: napi::Result<Vec<SearchHit>> = response
+                .retrieval
+                .hits
+                .into_iter()
+                .map(|h| {
+                    Ok(SearchHit {
+                        frame_id: u64_to_i64(h.frame_id)?,
+                        score: h.score.map(|s| s as f64),
+                        text: h.text,
+                        range_start: h.range.0 as i64,
+                        range_end: h.range.1 as i64,
+                        title: h.title,
+                        uri: Some(h.uri),
+                    })
+                })
+                .collect();
+
+            // Build context string from fragments
+            let context = context_fragments
+                .as_ref()
+                .map(|frags| {
+                    frags
+                        .iter()
+                        .map(|f| f.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n\n---\n\n")
+                })
+                .unwrap_or_default();
+
+            // Convert mode and retriever to strings
+            let mode_str = match response.mode {
+                RustAskMode::Lex => "lex",
+                RustAskMode::Sem => "sem",
+                RustAskMode::Hybrid => "hybrid",
+            };
+
+            let retriever_str = match response.retriever {
+                memvid_core::types::AskRetriever::Lex => "lex",
+                memvid_core::types::AskRetriever::Semantic => "semantic",
+                memvid_core::types::AskRetriever::Hybrid => "hybrid",
+                memvid_core::types::AskRetriever::LexFallback => "lex_fallback",
+                memvid_core::types::AskRetriever::TimelineFallback => "timeline_fallback",
+            };
+
+            Ok(AskResponseOutput {
+                question: response.question,
+                mode: mode_str.to_string(),
+                retriever: retriever_str.to_string(),
+                context_only: response.context_only,
+                answer: response.answer,
+                citations: citations?,
+                context_fragments: context_fragments?,
+                context,
+                hits: hits?,
+                total_hits: u64_to_i64(response.retrieval.total_hits as u64)?,
+                stats: AskStatsResult {
+                    retrieval_ms: response.stats.retrieval_ms as i64,
+                    synthesis_ms: response.stats.synthesis_ms as i64,
+                    latency_ms: response.stats.latency_ms as i64,
+                },
+            })
+        })
+    }
+
     /// Verify file integrity
     #[napi]
     pub fn verify(&self, deep: Option<bool>) -> napi::Result<bool> {
@@ -1368,6 +1812,72 @@ impl MemvidHandle {
             Ok(memvid
                 .get_current_memory(&entity, &slot)
                 .map(|card| card.value.clone()))
+        })
+    }
+
+    // ========================================================================
+    // Enrichment
+    // ========================================================================
+
+    /// Get the number of frames pending enrichment
+    ///
+    /// Returns the count of tasks in the enrichment queue.
+    #[napi]
+    pub fn enrichment_queue_len(&self) -> napi::Result<i64> {
+        self.with_memvid(|memvid| Ok(memvid.enrichment_queue_len() as i64))
+    }
+
+    /// Check if any frames need enrichment
+    ///
+    /// Returns true if there are pending enrichment tasks.
+    #[napi]
+    pub fn has_pending_enrichment(&self) -> napi::Result<bool> {
+        self.with_memvid(|memvid| Ok(memvid.has_pending_enrichment()))
+    }
+
+    /// Process all pending enrichment tasks synchronously
+    ///
+    /// This method processes all frames in the enrichment queue:
+    /// - Re-extracts full text for skim frames
+    /// - Updates search indexes with enriched content
+    /// - Marks frames as enriched when complete
+    ///
+    /// Returns the number of tasks processed.
+    #[napi]
+    pub fn process_all_enrichment(&self) -> napi::Result<i64> {
+        self.with_memvid(|memvid| Ok(memvid.process_all_enrichment() as i64))
+    }
+
+    /// Get enrichment statistics
+    ///
+    /// Returns statistics about the enrichment state of frames:
+    /// - total_frames: Total active frames
+    /// - enriched_frames: Frames that have been fully enriched
+    /// - pending_frames: Frames in the enrichment queue
+    /// - skimmed_frames: Frames that are searchable but not enriched
+    #[napi]
+    pub fn enrichment_stats(&self) -> napi::Result<EnrichmentStatsResult> {
+        self.with_memvid(|memvid| {
+            let stats = memvid.enrichment_stats();
+            Ok(EnrichmentStatsResult {
+                total_frames: stats.total_frames as i64,
+                enriched_frames: stats.enriched_frames as i64,
+                pending_frames: stats.pending_frames as i64,
+                skimmed_frames: stats.searchable_only as i64,
+            })
+        })
+    }
+
+    /// Mark a specific frame as enriched
+    ///
+    /// Updates the frame's enrichment state to indicate it has been fully processed.
+    /// This is useful for manual enrichment workflows.
+    #[napi]
+    pub fn mark_frame_enriched(&self, frame_id: i64) -> napi::Result<()> {
+        let frame_id_u64 = i64_to_usize(frame_id)? as u64;
+        self.with_memvid(move |memvid| {
+            memvid.mark_frame_enriched(frame_id_u64);
+            Ok(())
         })
     }
 
@@ -2031,4 +2541,34 @@ pub fn doctor(path: String, fix: Option<bool>) -> napi::Result<DoctorResultOutpu
             actions,
         })
     }))
+}
+
+// ============================================================================
+// PII Masking Functions
+// ============================================================================
+
+/// Mask PII (Personally Identifiable Information) in text
+///
+/// Detects and replaces common PII patterns with placeholder tokens:
+/// - Email addresses -> `[EMAIL]`
+/// - US Social Security Numbers -> `[SSN]`
+/// - Phone numbers (various formats) -> `[PHONE]`
+/// - Credit card numbers -> `[CREDIT_CARD]`
+/// - IPv4 addresses -> `[IP_ADDRESS]`
+/// - API keys/tokens (common patterns) -> `[API_KEY]`
+///
+/// The original data in the .mv2 file remains unchanged and fully searchable.
+/// This is useful for sanitizing text before sending to LLMs or external services.
+#[napi]
+pub fn mask_pii(text: String) -> String {
+    pii::mask_pii(&text)
+}
+
+/// Check if text contains any detectable PII
+///
+/// Returns `true` if any PII pattern is found, `false` otherwise.
+/// Useful for checking whether masking is needed before calling `maskPii`.
+#[napi]
+pub fn contains_pii(text: String) -> bool {
+    pii::contains_pii(&text)
 }

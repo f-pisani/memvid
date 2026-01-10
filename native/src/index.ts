@@ -691,3 +691,48 @@ export function doctor(path: string, fix?: boolean): DoctorResult {
     throw parseNapiError(error as Error);
   }
 }
+
+/**
+ * Mask PII (Personally Identifiable Information) in text.
+ *
+ * Detects and replaces common PII patterns with placeholder tokens:
+ * - Email addresses → `[EMAIL]`
+ * - US Social Security Numbers → `[SSN]`
+ * - Phone numbers (various formats) → `[PHONE]`
+ * - Credit card numbers → `[CREDIT_CARD]`
+ * - IPv4 addresses → `[IP_ADDRESS]`
+ * - API keys/tokens (common patterns) → `[API_KEY]`
+ *
+ * The original data in the .mv2 file remains unchanged and fully searchable.
+ * This is useful for sanitizing text before sending to LLMs or external services.
+ *
+ * @param text - The text to mask
+ * @returns Text with PII replaced by placeholders
+ *
+ * @example
+ * ```typescript
+ * const masked = maskPii('Contact john@example.com or call 555-123-4567');
+ * // "Contact [EMAIL] or call [PHONE]"
+ * ```
+ */
+export function maskPii(text: string): string {
+  return native.maskPii(text);
+}
+
+/**
+ * Check if text contains any detectable PII.
+ *
+ * @param text - The text to check
+ * @returns true if any PII pattern is found, false otherwise
+ *
+ * @example
+ * ```typescript
+ * if (containsPii(userInput)) {
+ *   const safe = maskPii(userInput);
+ *   // send safe version to LLM
+ * }
+ * ```
+ */
+export function containsPii(text: string): boolean {
+  return native.containsPii(text);
+}
