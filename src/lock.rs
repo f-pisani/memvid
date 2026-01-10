@@ -67,7 +67,7 @@ impl FileLock {
                         mode: LockMode::Exclusive,
                     }));
                 }
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(err) if err.kind() == contended_kind => return Ok(None),
                 Err(err) => return Err(MemvidError::Lock(err.to_string())),
             }
@@ -146,7 +146,7 @@ impl FileLock {
             };
             match result {
                 Ok(()) => return Ok(()),
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
                 Err(err) if err.kind() == contended_kind => {
                     if attempts >= MAX_ATTEMPTS {
                         return Err(MemvidError::Lock(
@@ -156,7 +156,6 @@ impl FileLock {
                     }
                     attempts += 1;
                     thread::sleep(BACKOFF);
-                    continue;
                 }
                 Err(err) => return Err(MemvidError::Lock(err.to_string())),
             }

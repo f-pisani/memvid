@@ -96,6 +96,21 @@ cargo fmt --all
 2. `cargo test -p memvid-core` passes
 3. Any new features have tests
 
+## Pull Request Workflow
+
+**Always open PRs as draft** unless the user explicitly requests otherwise. This allows:
+- CI to run on every push for validation during development
+- The user to mark ready for review when they're satisfied
+- Avoiding premature review requests
+
+```bash
+# Create a draft PR
+gh pr create --draft --title "feat: description" --body "..."
+
+# Mark ready when done
+gh pr ready
+```
+
 ## Key APIs
 
 ```rust

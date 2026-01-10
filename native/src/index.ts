@@ -606,3 +606,133 @@ export function open(path: string): Memvid {
 export function version(): string {
   return native.version();
 }
+
+/**
+ * Encrypt a memvid file with a password.
+ * Creates an encrypted copy with .mv2e extension.
+ *
+ * @param path - Path to the .mv2 file to encrypt
+ * @param password - Password for encryption (must not be empty)
+ * @returns Path to the encrypted file (.mv2e)
+ *
+ * @example
+ * ```typescript
+ * const encryptedPath = lock('./data.mv2', 'my-secure-password');
+ * console.log('Encrypted file:', encryptedPath); // './data.mv2e'
+ * ```
+ */
+export function lock(path: string, password: string): string {
+  try {
+    return native.lock(path, password);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
+}
+
+/**
+ * Decrypt an encrypted memvid file.
+ * Creates a decrypted copy with .mv2 extension.
+ *
+ * @param path - Path to the .mv2e file to decrypt
+ * @param password - Password used for encryption
+ * @returns Path to the decrypted file (.mv2)
+ *
+ * @example
+ * ```typescript
+ * const decryptedPath = unlock('./data.mv2e', 'my-secure-password');
+ * console.log('Decrypted file:', decryptedPath); // './data.mv2'
+ * ```
+ */
+export function unlock(path: string, password: string): string {
+  try {
+    return native.unlock(path, password);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
+}
+
+/**
+ * Result from running the doctor diagnostic/repair tool
+ */
+export interface DoctorResult {
+  /** Number of issues found during diagnosis */
+  issuesFound: number;
+  /** Number of issues fixed during repair (0 if fix=false) */
+  issuesFixed: number;
+  /** Descriptions of actions taken */
+  actions: string[];
+}
+
+/**
+ * Run diagnostic checks on a memvid file and optionally repair issues.
+ *
+ * @param path - Path to the .mv2 file to check
+ * @param fix - If true, attempt to repair issues found (default: false)
+ * @returns Diagnostic results
+ *
+ * @example
+ * ```typescript
+ * // Diagnosis only (read-only)
+ * const result = doctor('./data.mv2');
+ * if (result.issuesFound > 0) {
+ *   console.log('Issues found:', result.issuesFound);
+ *   console.log('Actions:', result.actions);
+ * }
+ *
+ * // Diagnosis with repair
+ * const repairResult = doctor('./data.mv2', true);
+ * console.log('Issues fixed:', repairResult.issuesFixed);
+ * ```
+ */
+export function doctor(path: string, fix?: boolean): DoctorResult {
+  try {
+    return native.doctor(path, fix);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
+}
+
+/**
+ * Mask PII (Personally Identifiable Information) in text.
+ *
+ * Detects and replaces common PII patterns with placeholder tokens:
+ * - Email addresses → `[EMAIL]`
+ * - US Social Security Numbers → `[SSN]`
+ * - Phone numbers (various formats) → `[PHONE]`
+ * - Credit card numbers → `[CREDIT_CARD]`
+ * - IPv4 addresses → `[IP_ADDRESS]`
+ * - API keys/tokens (common patterns) → `[API_KEY]`
+ *
+ * The original data in the .mv2 file remains unchanged and fully searchable.
+ * This is useful for sanitizing text before sending to LLMs or external services.
+ *
+ * @param text - The text to mask
+ * @returns Text with PII replaced by placeholders
+ *
+ * @example
+ * ```typescript
+ * const masked = maskPii('Contact john@example.com or call 555-123-4567');
+ * // "Contact [EMAIL] or call [PHONE]"
+ * ```
+ */
+export function maskPii(text: string): string {
+  return native.maskPii(text);
+}
+
+/**
+ * Check if text contains any detectable PII.
+ *
+ * @param text - The text to check
+ * @returns true if any PII pattern is found, false otherwise
+ *
+ * @example
+ * ```typescript
+ * if (containsPii(userInput)) {
+ *   const safe = maskPii(userInput);
+ *   // send safe version to LLM
+ * }
+ * ```
+ */
+export function containsPii(text: string): boolean {
+  return native.containsPii(text);
+}

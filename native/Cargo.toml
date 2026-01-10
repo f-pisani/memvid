@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 # - path: uses local source for development
 # - version: ensures compatibility with published crate
 # Note: vec feature disabled for now due to ort-sys glibc requirements
-memvid-core = { version = "^2.0", path = "..", features = ["lex"] }
+memvid-core = { version = "^2.0", path = "..", features = ["lex", "encryption"] }
 
 # NAPI-RS for Node.js bindings
 napi = { version = "2", default-features = false, features = ["async", "serde-json", "napi8"] }

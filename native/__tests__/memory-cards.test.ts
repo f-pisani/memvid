@@ -1,0 +1,241 @@
+/**
+ * Memory Cards API tests for memvid-node
+ *
+ * Tests for the structured key-value memory storage system:
+ * - put_memory_card, put_memory_cards (batch)
+ * - get_current_memory, get_entity_memories
+ * - memories_stats, memory_card_count
+ * - state (convenience lookup)
+ * - clear_memories
+ */
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import * as crypto from 'crypto';
+import { Memvid } from '../dist/index.js';
+
+const TEST_DIR = os.tmpdir();
+
+/** Generate a unique test file path */
+function uniqueTestFile(prefix: string = 'memory'): string {
+  return path.join(TEST_DIR, `memvid_${prefix}_${crypto.randomUUID()}.mv2`);
+}
+
+describe('Memory Cards', () => {
+  let mem: Memvid;
+  let testFile: string;
+
+  beforeEach(() => {
+    testFile = uniqueTestFile('memory');
+    mem = Memvid.create(testFile);
+    mem.enableLex();
+  });
+
+  afterEach(() => {
+    if (!mem.isClosed) {
+      mem.close();
+    }
+    if (fs.existsSync(testFile)) {
+      fs.unlinkSync(testFile);
+    }
+  });
+
+  describe('put_memory_card', () => {
+    it('should create a memory card with required fields', () => {
+      const handle = (mem as any).handle;
+
+      const cardId = handle.putMemoryCard({
+        entity: 'user',
+        slot: 'name',
+        value: 'John Doe',
+      });
+
+      // Card IDs start at 0
+      expect(typeof cardId).toBe('number');
+      expect(cardId).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should create a memory card with all fields', () => {
+      const handle = (mem as any).handle;
+
+      const cardId = handle.putMemoryCard({
+        entity: 'project',
+        slot: 'status',
+        value: 'active',
+        kind: 'fact',
+        confidence: 0.95,
+        sourceFrameId: 1,
+        sourceUri: 'doc://source/1',
+      });
+
+      expect(typeof cardId).toBe('number');
+      expect(cardId).toBeGreaterThanOrEqual(0);
+    });
+
+    it('should accept different memory kinds', () => {
+      const handle = (mem as any).handle;
+      const kinds = ['fact', 'preference', 'event', 'profile', 'relationship', 'goal', 'other'];
+
+      for (const kind of kinds) {
+        const cardId = handle.putMemoryCard({
+          entity: 'test',
+          slot: `slot_${kind}`,
+          value: `value_${kind}`,
+          kind,
+        });
+        expect(typeof cardId).toBe('number');
+        expect(cardId).toBeGreaterThanOrEqual(0);
+      }
+    });
+  });
+
+  describe('put_memory_cards (batch)', () => {
+    it('should create multiple memory cards at once', () => {
+      const handle = (mem as any).handle;
+
+      const cards = [
+        { entity: 'user', slot: 'name', value: 'Alice' },
+        { entity: 'user', slot: 'email', value: 'alice@example.com' },
+        { entity: 'user', slot: 'age', value: '30' },
+      ];
+
+      const cardIds = handle.putMemoryCards(cards);
+
+      expect(Array.isArray(cardIds)).toBe(true);
+      expect(cardIds.length).toBe(3);
+      cardIds.forEach((id: number) => expect(id).toBeGreaterThanOrEqual(0));
+    });
+  });
+
+  describe('get_current_memory', () => {
+    it('should retrieve current memory for entity:slot', () => {
+      const handle = (mem as any).handle;
+
+      handle.putMemoryCard({
+        entity: 'user',
+        slot: 'employer',
+        value: 'Acme Corp',
+      });
+
+      const card = handle.getCurrentMemory('user', 'employer');
+
+      expect(card).toBeDefined();
+      expect(card.entity).toBe('user');
+      expect(card.slot).toBe('employer');
+      expect(card.value).toBe('Acme Corp');
+    });
+
+    it('should return null for non-existent memory', () => {
+      const handle = (mem as any).handle;
+
+      const card = handle.getCurrentMemory('nonexistent', 'slot');
+
+      expect(card).toBeNull();
+    });
+
+    it('should return the most recent value for a slot', () => {
+      const handle = (mem as any).handle;
+
+      // Add multiple values for same slot
+      handle.putMemoryCard({ entity: 'user', slot: 'location', value: 'New York' });
+      handle.putMemoryCard({ entity: 'user', slot: 'location', value: 'San Francisco' });
+      handle.putMemoryCard({ entity: 'user', slot: 'location', value: 'Seattle' });
+
+      const card = handle.getCurrentMemory('user', 'location');
+
+      expect(card).toBeDefined();
+      expect(card.value).toBe('Seattle');
+    });
+  });
+
+  describe('get_entity_memories', () => {
+    it('should retrieve all memories for an entity', () => {
+      const handle = (mem as any).handle;
+
+      handle.putMemoryCard({ entity: 'project', slot: 'name', value: 'Memvid' });
+      handle.putMemoryCard({ entity: 'project', slot: 'status', value: 'active' });
+      handle.putMemoryCard({ entity: 'project', slot: 'priority', value: 'high' });
+
+      const cards = handle.getEntityMemories('project');
+
+      expect(Array.isArray(cards)).toBe(true);
+      expect(cards.length).toBe(3);
+      cards.forEach((card: any) => expect(card.entity).toBe('project'));
+    });
+
+    it('should return empty array for non-existent entity', () => {
+      const handle = (mem as any).handle;
+
+      const cards = handle.getEntityMemories('nonexistent');
+
+      expect(Array.isArray(cards)).toBe(true);
+      expect(cards.length).toBe(0);
+    });
+  });
+
+  describe('memories_stats', () => {
+    it('should return memory statistics', () => {
+      const handle = (mem as any).handle;
+
+      handle.putMemoryCard({ entity: 'user1', slot: 'name', value: 'Alice' });
+      handle.putMemoryCard({ entity: 'user2', slot: 'name', value: 'Bob' });
+      handle.putMemoryCard({ entity: 'user1', slot: 'email', value: 'alice@test.com' });
+
+      const stats = handle.memoriesStats();
+
+      expect(stats).toBeDefined();
+      expect(stats.cardCount).toBe(3);
+      expect(stats.entityCount).toBe(2);
+    });
+  });
+
+  describe('memory_card_count', () => {
+    it('should return total card count', () => {
+      const handle = (mem as any).handle;
+
+      expect(handle.memoryCardCount()).toBe(0);
+
+      handle.putMemoryCard({ entity: 'test', slot: 'a', value: '1' });
+      handle.putMemoryCard({ entity: 'test', slot: 'b', value: '2' });
+
+      expect(handle.memoryCardCount()).toBe(2);
+    });
+  });
+
+  describe('state (convenience lookup)', () => {
+    it('should return value for entity:slot', () => {
+      const handle = (mem as any).handle;
+
+      handle.putMemoryCard({ entity: 'config', slot: 'theme', value: 'dark' });
+
+      const value = handle.state('config', 'theme');
+
+      expect(value).toBe('dark');
+    });
+
+    it('should return null for non-existent state', () => {
+      const handle = (mem as any).handle;
+
+      const value = handle.state('nonexistent', 'slot');
+
+      expect(value).toBeNull();
+    });
+  });
+
+  describe('clear_memories', () => {
+    it('should clear all memory cards', () => {
+      const handle = (mem as any).handle;
+
+      handle.putMemoryCard({ entity: 'user', slot: 'name', value: 'Test' });
+      handle.putMemoryCard({ entity: 'user', slot: 'email', value: 'test@test.com' });
+
+      expect(handle.memoryCardCount()).toBe(2);
+
+      handle.clearMemories();
+
+      expect(handle.memoryCardCount()).toBe(0);
+    });
+  });
+});

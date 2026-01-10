@@ -18,11 +18,12 @@ impl PassthroughReader {
     fn supported_format(format: Option<DocumentFormat>) -> bool {
         matches!(
             format,
-            Some(DocumentFormat::Pdf)
-                | Some(DocumentFormat::PlainText)
-                | Some(DocumentFormat::Markdown)
-                | Some(DocumentFormat::Html)
-                | None
+            Some(
+                DocumentFormat::Pdf
+                    | DocumentFormat::PlainText
+                    | DocumentFormat::Markdown
+                    | DocumentFormat::Html
+            ) | None
         )
     }
 }

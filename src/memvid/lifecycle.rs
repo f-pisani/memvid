@@ -313,7 +313,7 @@ impl Memvid {
         let mut header = HeaderCodec::read(&mut file)?;
         let toc = match read_toc(&mut file, &header) {
             Ok(toc) => toc,
-            Err(err @ MemvidError::Decode(_)) | Err(err @ MemvidError::InvalidToc { .. }) => {
+            Err(err @ (MemvidError::Decode(_) | MemvidError::InvalidToc { .. })) => {
                 tracing::info!("toc decode failed ({}); attempting recovery", err);
                 let (toc, recovered_offset) = recover_toc(&mut file, Some(header.footer_offset))?;
                 if recovered_offset != header.footer_offset

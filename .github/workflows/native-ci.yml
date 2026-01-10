@@ -7,10 +7,15 @@ on:
       - 'native/**'
       - '.github/workflows/native-ci.yml'
   pull_request:
+    types: [opened, synchronize, ready_for_review]
     branches: [main]
     paths:
       - 'native/**'
       - '.github/workflows/native-ci.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 defaults:
   run:

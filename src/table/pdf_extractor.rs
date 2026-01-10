@@ -886,17 +886,18 @@ fn infer_column_count(lines: &[String], currency_re: &Regex, _date_re: &Regex) -
     let mut i = 0;
 
     while i + 1 < lines.len() {
-        let line1 = lines[i].trim();
-        let line2 = lines[i + 1].trim();
+        let current = lines[i].trim();
+        let next = lines[i + 1].trim();
 
-        // Check if line1 is a label (text) and line2 is a value (numeric/currency)
-        let line1_is_label =
-            !line1.is_empty() && !currency_re.is_match(line1) && line1.parse::<f64>().is_err();
+        // Check if current is a label (text) and next is a value (numeric/currency)
+        let current_is_label = !current.is_empty()
+            && !currency_re.is_match(current)
+            && current.parse::<f64>().is_err();
 
-        let line2_is_value =
-            currency_re.is_match(line2) || line2.parse::<f64>().is_ok() || line2.contains('$');
+        let next_is_value =
+            currency_re.is_match(next) || next.parse::<f64>().is_ok() || next.contains('$');
 
-        if line1_is_label && line2_is_value {
+        if current_is_label && next_is_value {
             consecutive_label_value += 1;
         }
 

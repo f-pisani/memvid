@@ -1,3 +1,6 @@
+ > [!CAUTION]
+> **Experimental Fork** - This repository is a fork of [memvid/memvid](https://github.com/memvid/memvid), created to remove limitations from the original implementation and enable unrestricted experimentation. **For experimentation and learning only** - not for production use. For the official version, see the [original repository](https://github.com/memvid/memvid).
+
 <img width="2000" height="491" alt="Social Cover (6)" src="https://github.com/user-attachments/assets/4e256804-53ac-4173-bcff-81994d52bf5c" />
 
 <p align="center">

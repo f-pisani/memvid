@@ -358,9 +358,13 @@ pub fn compute_embedding_quality(embeddings: &[(u64, Vec<f32>)]) -> EmbeddingQua
 
         while similarities.len() < max_pairs {
             // Simple LCG random
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            rng_state = rng_state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             let i = (rng_state as usize) % vector_count;
-            rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
+            rng_state = rng_state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
             let j = (rng_state as usize) % vector_count;
 
             if i != j {

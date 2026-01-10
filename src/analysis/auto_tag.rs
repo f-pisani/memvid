@@ -17,6 +17,7 @@ impl AutoTagger {
     const MAX_TAGS: usize = 12;
     const MAX_LABELS: usize = 6;
 
+    #[allow(clippy::unused_self)]
     pub fn analyse(&self, text: &str, include_dates: bool) -> AutoTagResult {
         if text.trim().is_empty() {
             return AutoTagResult::default();
@@ -39,6 +40,8 @@ impl AutoTagger {
 }
 
 fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
+    // Unwrap is safe: regex pattern is a compile-time constant
+    #[allow(clippy::unwrap_used)]
     static TOKEN_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(?i)[a-z0-9][a-z0-9'-]+").unwrap());
     static STOPWORDS: Lazy<BTreeSet<&'static str>> = Lazy::new(|| {
         [
@@ -131,6 +134,8 @@ fn extract_keywords(text: &str, limit: usize) -> Vec<String> {
 }
 
 fn derive_labels(text: &str, limit: usize) -> Vec<String> {
+    // Unwrap is safe: regex pattern is a compile-time constant
+    #[allow(clippy::unwrap_used)]
     static PHRASE_RE: Lazy<Regex> =
         Lazy::new(|| Regex::new(r"(?m)^(?P<phrase>[A-Z][A-Za-z0-9 &/-]{3,})$").unwrap());
 
@@ -166,11 +171,15 @@ fn extract_dates(text: &str) -> Vec<String> {
     // 2. ISO dates: 2024-09-01
     // 3. US format: 09/01/2024
     // 4. Spelled out: September 1, 2024 or Sept 1, 2024 or 1 September 2024
+    // Unwrap is safe: regex pattern is a compile-time constant
+    #[allow(clippy::unwrap_used)]
     static DATE_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(r"(?i)\b((?:19|20)\d{2}|\d{4}-\d{2}-\d{2}|\d{2}/\d{2}/\d{4})\b").unwrap()
     });
 
     // Match spelled-out dates like "September 1, 2024", "Sept 10, 2024", "September 1st, 2024"
+    // Unwrap is safe: regex pattern is a compile-time constant
+    #[allow(clippy::unwrap_used)]
     static SPELLED_DATE_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(
             r"(?i)\b((?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+\d{1,2}(?:st|nd|rd|th)?,?\s+(?:19|20)\d{2})\b"
@@ -178,6 +187,8 @@ fn extract_dates(text: &str) -> Vec<String> {
     });
 
     // Match European format: "1 September 2024", "1st September 2024"
+    // Unwrap is safe: regex pattern is a compile-time constant
+    #[allow(clippy::unwrap_used)]
     static EURO_DATE_RE: Lazy<Regex> = Lazy::new(|| {
         Regex::new(
             r"(?i)\b(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\.?\s+(?:19|20)\d{2})\b"
