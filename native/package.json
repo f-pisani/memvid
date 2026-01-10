@@ -17,9 +17,6 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "build:native": "napi build --platform --release",
-    "build:native:debug": "napi build --platform",
-    "build:ts": "tsc",
     "test": "vitest run",
     "test:watch": "vitest",
     "artifacts": "napi artifacts",
