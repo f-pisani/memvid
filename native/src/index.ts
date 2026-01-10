@@ -622,7 +622,11 @@ export function version(): string {
  * ```
  */
 export function lock(path: string, password: string): string {
-  return native.lock(path, password);
+  try {
+    return native.lock(path, password);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
 }
 
 /**
@@ -640,7 +644,11 @@ export function lock(path: string, password: string): string {
  * ```
  */
 export function unlock(path: string, password: string): string {
-  return native.unlock(path, password);
+  try {
+    return native.unlock(path, password);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
 }
 
 /**
@@ -677,5 +685,9 @@ export interface DoctorResult {
  * ```
  */
 export function doctor(path: string, fix?: boolean): DoctorResult {
-  return native.doctor(path, fix);
+  try {
+    return native.doctor(path, fix);
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
 }
