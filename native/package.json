@@ -24,7 +24,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "artifacts": "napi artifacts",
-    "prepublishOnly": "napi prepublish -t npm",
+    "prepublishOnly": "echo 'Skipping napi prepublish in CI'",
     "version": "napi version"
   },
   "napi": {
