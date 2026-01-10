@@ -98,6 +98,13 @@ jobs:
           find artifacts -name "*.node" -exec mv {} . \;
           ls -la *.node
 
+      - name: Generate native binding entry point
+        working-directory: native
+        run: |
+          # napi artifacts generates index.js and index.d.ts for loading the correct .node file
+          npx napi artifacts
+          ls -la index.js index.d.ts
+
       - name: Build TypeScript
         working-directory: native
         run: npm run build:ts
