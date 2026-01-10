@@ -7,7 +7,7 @@ on:
       - 'native/**'
       - '.github/workflows/native-ci.yml'
   pull_request:
-    types: [opened, ready_for_review]
+    types: [opened, synchronize, ready_for_review]
     branches: [main]
     paths:
       - 'native/**'
