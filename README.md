@@ -1,5 +1,18 @@
 <img width="2000" height="491" alt="Social Cover (6)" src="https://github.com/user-attachments/assets/4e256804-53ac-4173-bcff-81994d52bf5c" />
 
+> **Experimental Fork**
+>
+> This repository is a fork of [memvid/memvid](https://github.com/memvid/memvid), created to remove limitations from the original implementation and enable unrestricted experimentation with the SDK.
+>
+> **This fork is intended for experimentation and learning purposes only** - not for production use or active development. If you're looking for the official, supported version, please use the [original repository](https://github.com/memvid/memvid).
+>
+> Key changes in this fork:
+> - Full Node.js SDK with all advertised features exposed
+> - Encryption enabled by default (no feature-gating)
+> - Comprehensive examples and tests
+
+---
+
 <p align="center">
  <a href="docs/i18n/README.fr.md">🇫🇷 Français</a>
  <a href="docs/i18n/README.so.md">🇸🇴 Soomaali</a>
