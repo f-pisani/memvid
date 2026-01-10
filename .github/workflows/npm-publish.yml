@@ -98,6 +98,18 @@ jobs:
           find artifacts -name "*.node" -exec mv {} . \;
           ls -la *.node
 
+      - name: Build TypeScript
+        working-directory: native
+        run: npm run build:ts
+
+      - name: Verify dist folder
+        working-directory: native
+        run: |
+          echo "=== dist folder contents ==="
+          ls -la dist/
+          echo "=== Checking for index.js ==="
+          test -f dist/index.js || (echo "ERROR: dist/index.js missing!" && exit 1)
+
       - name: Prepare packages
         working-directory: native
         run: npx napi prepublish -t npm
