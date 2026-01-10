@@ -105,6 +105,7 @@ impl Memvid {
             no_sketch: true,
             exclude_frame_ids: Vec::new(),
             exclude_uris: Vec::new(),
+            memory_filters: Vec::new(),
         };
 
         // Pre-compute the query embedding once so we can reuse it for vector recall and semantic re-rank

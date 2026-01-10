@@ -269,7 +269,100 @@ async function main() {
   }
 
   // -------------------------------------------------------------------------
-  // Step 11: Reopen and verify persistence
+  // Step 11: Using Memory Filters in Search
+  // -------------------------------------------------------------------------
+  // Memory filters restrict search results to frames matching Memory Card criteria.
+  // This is applied at query-time BEFORE search ranking for efficient filtering.
+
+  console.log('\n--- Using Memory Filters in Search ---\n');
+
+  // Store some documents about different programming topics
+  mem.put(Buffer.from('Python is a great language for machine learning and data science.'), {
+    uri: 'doc://python/ml',
+    title: 'Python for ML'
+  });
+  mem.put(Buffer.from('TypeScript provides type safety for JavaScript applications.'), {
+    uri: 'doc://typescript/intro',
+    title: 'TypeScript Intro'
+  });
+  mem.put(Buffer.from('Rust provides memory safety without garbage collection.'), {
+    uri: 'doc://rust/intro',
+    title: 'Rust Intro'
+  });
+
+  // Link documents to entities via memory cards
+  // Each document is linked to a "language" entity
+  handle.putMemoryCard({
+    entity: 'python',
+    slot: 'topic',
+    value: 'machine learning',
+    sourceFrameId: mem.stats().frameCount - 2,
+    kind: 'fact',
+  });
+  handle.putMemoryCard({
+    entity: 'typescript',
+    slot: 'topic',
+    value: 'web development',
+    sourceFrameId: mem.stats().frameCount - 1,
+    kind: 'fact',
+  });
+  handle.putMemoryCard({
+    entity: 'rust',
+    slot: 'topic',
+    value: 'systems programming',
+    sourceFrameId: mem.stats().frameCount,
+    kind: 'fact',
+  });
+
+  mem.commit();
+
+  // Search without filters - finds all programming language docs
+  console.log('Search for "programming" without filters:');
+  const allResults = mem.find('programming', { topK: 10 });
+  console.log(`  Found ${allResults.hits.length} results`);
+  allResults.hits.forEach(hit => console.log(`    - ${hit.uri}`));
+
+  // Search with entity filter - only find docs about a specific language
+  console.log('\nSearch for "programming" filtered by entity "rust":');
+  const rustResults = mem.find('programming', {
+    topK: 10,
+    memoryFilters: [{ entity: 'rust' }]
+  });
+  console.log(`  Found ${rustResults.hits.length} results`);
+  rustResults.hits.forEach(hit => console.log(`    - ${hit.uri}`));
+
+  // Search with slot filter - find docs with specific memory slot
+  console.log('\nSearch for "language" filtered by slot "topic":');
+  const topicResults = mem.find('language', {
+    topK: 10,
+    memoryFilters: [{ slot: 'topic' }]
+  });
+  console.log(`  Found ${topicResults.hits.length} results`);
+  topicResults.hits.forEach(hit => console.log(`    - ${hit.uri}`));
+
+  // Search with value filter - find docs where memory value contains substring
+  console.log('\nSearch for "great" filtered by valueContains "learning":');
+  const mlResults = mem.find('great', {
+    topK: 10,
+    memoryFilters: [{ valueContains: 'learning' }]
+  });
+  console.log(`  Found ${mlResults.hits.length} results`);
+  mlResults.hits.forEach(hit => console.log(`    - ${hit.uri}`));
+
+  // OR across multiple filters - find docs matching ANY filter
+  console.log('\nSearch for "programming" with OR filters (python OR typescript):');
+  const multiResults = mem.find('programming', {
+    topK: 10,
+    memoryFilters: [
+      { entity: 'python' },
+      { entity: 'typescript' }
+    ]
+  });
+  console.log(`  Found ${multiResults.hits.length} results`);
+  multiResults.hits.forEach(hit => console.log(`    - ${hit.uri}`));
+
+  // -------------------------------------------------------------------------
+  // Step 12: Reopen and verify persistence
   // -------------------------------------------------------------------------
   // Memory cards persist across sessions.
 

@@ -43,6 +43,7 @@ import type {
   EmbeddingProvider,
   PutManyResult,
   PutManyItemResult,
+  MemoryFilter,
 } from './types';
 import { parseNapiError, VecDimensionMismatchError, MemvidError } from './error';
 
@@ -368,7 +369,7 @@ export class Memvid {
    * Search for documents using text search
    *
    * @param query - Search query string
-   * @param options - Search options (topK, uri, scope, excludeFrameIds, excludeUris)
+   * @param options - Search options (topK, uri, scope, excludeFrameIds, excludeUris, memoryFilters)
    * @returns Search results with hits and metadata
    *
    * @example
@@ -381,6 +382,12 @@ export class Memvid {
    *   topK: 5,
    *   scope: 'doc://articles/',
    *   excludeFrameIds: [0, 1],
+   * });
+   *
+   * // With memory filters (filter by entity's memories)
+   * const personResults = mem.find('work history', {
+   *   topK: 10,
+   *   memoryFilters: [{ entity: 'alice', slot: 'employer' }]
    * });
    * ```
    */
@@ -395,6 +402,7 @@ export class Memvid {
     let scope: string | undefined;
     let excludeIds: number[] | undefined;
     let excludeUris: string[] | undefined;
+    let memoryFilters: MemoryFilter[] | undefined;
 
     if (typeof options === 'number') {
       // Old signature: find(query, topK)
@@ -406,11 +414,12 @@ export class Memvid {
       scope = options.scope;
       excludeIds = options.excludeFrameIds;
       excludeUris = options.excludeUris;
+      memoryFilters = options.memoryFilters;
     }
 
     try {
       // Call native function with individual parameters
-      return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris) as SearchResult;
+      return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris, memoryFilters) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }

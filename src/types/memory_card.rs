@@ -48,17 +48,26 @@ impl MemoryKind {
         }
     }
 
-    /// Parse a string into a MemoryKind.
+    /// Parse a string into a MemoryKind. Returns `Other` for unrecognized values.
     #[must_use]
     pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "fact" => Self::Fact,
-            "preference" => Self::Preference,
-            "event" => Self::Event,
-            "profile" => Self::Profile,
-            "relationship" => Self::Relationship,
-            "goal" => Self::Goal,
-            _ => Self::Other,
+        Self::try_from_str(s).unwrap_or(Self::Other)
+    }
+
+    /// Try to parse a string into a MemoryKind.
+    ///
+    /// Returns `None` for unrecognized values (unlike `from_str` which returns `Other`).
+    #[must_use]
+    pub fn try_from_str(s: &str) -> Option<Self> {
+        match s.to_ascii_lowercase().as_str() {
+            "fact" => Some(Self::Fact),
+            "preference" => Some(Self::Preference),
+            "event" => Some(Self::Event),
+            "profile" => Some(Self::Profile),
+            "relationship" => Some(Self::Relationship),
+            "goal" => Some(Self::Goal),
+            "other" => Some(Self::Other),
+            _ => None,
         }
     }
 }

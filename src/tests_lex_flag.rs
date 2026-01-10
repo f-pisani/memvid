@@ -72,6 +72,7 @@ mod tests {
                         no_sketch: false,
                         exclude_frame_ids: Vec::new(),
                         exclude_uris: Vec::new(),
+                        memory_filters: Vec::new(),
                     })
                     .expect("search must succeed");
 

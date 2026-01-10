@@ -619,3 +619,440 @@ fn search_exclude_combined() {
         "Excluded URI should not appear"
     );
 }
+
+// ============================================================================
+// Memory Filter Integration Tests
+// ============================================================================
+
+use memvid_core::{MemoryCardBuilder, MemoryFilter, MemoryKind};
+
+/// Test search with memory_filters by entity.
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_by_entity() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        // Create frames about different programming languages
+        let opts_rust = PutOptions {
+            uri: Some("mv2://lang/rust".to_string()),
+            search_text: Some(
+                "Rust is a systems programming language focused on safety".to_string(),
+            ),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Rust programming", opts_rust)
+            .unwrap();
+
+        let opts_python = PutOptions {
+            uri: Some("mv2://lang/python".to_string()),
+            search_text: Some("Python is great for machine learning and data science".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Python programming", opts_python)
+            .unwrap();
+
+        let opts_go = PutOptions {
+            uri: Some("mv2://lang/go".to_string()),
+            search_text: Some(
+                "Go is designed for concurrent programming and simplicity".to_string(),
+            ),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Go programming", opts_go)
+            .unwrap();
+
+        // Add memory cards linking frames to entities
+        let card_rust = MemoryCardBuilder::new()
+            .fact()
+            .entity("rust")
+            .slot("category")
+            .value("systems")
+            .source(0, Some("mv2://lang/rust".to_string()))
+            .engine("test", "1.0")
+            .build(0)
+            .unwrap();
+        mem.put_memory_card(card_rust).unwrap();
+
+        let card_python = MemoryCardBuilder::new()
+            .fact()
+            .entity("python")
+            .slot("category")
+            .value("scripting")
+            .source(1, Some("mv2://lang/python".to_string()))
+            .engine("test", "1.0")
+            .build(1)
+            .unwrap();
+        mem.put_memory_card(card_python).unwrap();
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // Search without filter - should find all programming docs
+    let all_results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(all_results.hits.len() >= 2, "Should find multiple docs");
+
+    // Search with entity filter - only rust
+    let rust_results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::entity("rust")],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(rust_results.hits.len(), 1, "Should find only rust doc");
+    assert_eq!(rust_results.hits[0].uri, "mv2://lang/rust");
+}
+
+/// Test search with memory_filters by slot.
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_by_slot() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        // Create frames
+        let opts1 = PutOptions {
+            uri: Some("mv2://doc/1".to_string()),
+            search_text: Some("Document about artificial intelligence".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"AI doc", opts1).unwrap();
+
+        let opts2 = PutOptions {
+            uri: Some("mv2://doc/2".to_string()),
+            search_text: Some("Document about artificial neural networks".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Neural doc", opts2).unwrap();
+
+        // Add memory cards with different slots
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("topic")
+            .slot("field")
+            .value("AI")
+            .source(0, None)
+            .engine("test", "1.0")
+            .build(0)
+            .unwrap();
+        mem.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("topic")
+            .slot("technique")
+            .value("neural networks")
+            .source(1, None)
+            .engine("test", "1.0")
+            .build(1)
+            .unwrap();
+        mem.put_memory_card(card2).unwrap();
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // Filter by slot "field"
+    let results = mem
+        .search(SearchRequest {
+            query: "artificial".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::slot("field")],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        results.hits.len(),
+        1,
+        "Should find only doc with 'field' slot"
+    );
+    assert_eq!(results.hits[0].uri, "mv2://doc/1");
+}
+
+/// Test search with memory_filters OR behavior (multiple filters).
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_or_behavior() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        // Create 3 frames
+        for (i, lang) in ["rust", "python", "go"].iter().enumerate() {
+            let opts = PutOptions {
+                uri: Some(format!("mv2://lang/{}", lang)),
+                search_text: Some(format!("{} is a programming language", lang)),
+                ..Default::default()
+            };
+            mem.put_bytes_with_options(format!("{} code", lang).as_bytes(), opts)
+                .unwrap();
+
+            let card = MemoryCardBuilder::new()
+                .fact()
+                .entity(lang.to_string())
+                .slot("type")
+                .value("language")
+                .source(i as u64, None)
+                .engine("test", "1.0")
+                .build(i as u64)
+                .unwrap();
+            mem.put_memory_card(card).unwrap();
+        }
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // Search with OR across multiple entity filters
+    let results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::entity("rust"), MemoryFilter::entity("python")],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        results.hits.len(),
+        2,
+        "Should find rust and python (OR behavior)"
+    );
+    let uris: Vec<_> = results.hits.iter().map(|h| h.uri.as_str()).collect();
+    assert!(uris.contains(&"mv2://lang/rust"), "Should contain rust");
+    assert!(uris.contains(&"mv2://lang/python"), "Should contain python");
+    assert!(!uris.contains(&"mv2://lang/go"), "Should not contain go");
+}
+
+/// Test search with memory_filters no matches returns empty.
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_no_matches() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        let opts = PutOptions {
+            uri: Some("mv2://doc/1".to_string()),
+            search_text: Some("Document about programming".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Doc", opts).unwrap();
+
+        // Add a memory card
+        let card = MemoryCardBuilder::new()
+            .fact()
+            .entity("existing")
+            .slot("topic")
+            .value("code")
+            .source(0, None)
+            .engine("test", "1.0")
+            .build(0)
+            .unwrap();
+        mem.put_memory_card(card).unwrap();
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // Filter by non-existent entity
+    let results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::entity("nonexistent")],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        results.hits.len(),
+        0,
+        "Should return empty when no memory cards match"
+    );
+}
+
+/// Test search with memory_filters by kind.
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_by_kind() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        // Create two frames
+        let opts1 = PutOptions {
+            uri: Some("mv2://doc/fact".to_string()),
+            search_text: Some("Document with fact about programming".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Fact doc", opts1).unwrap();
+
+        let opts2 = PutOptions {
+            uri: Some("mv2://doc/preference".to_string()),
+            search_text: Some("Document with preference about programming".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"Pref doc", opts2).unwrap();
+
+        // Add memory cards with different kinds
+        let card1 = MemoryCardBuilder::new()
+            .fact() // Kind::Fact
+            .entity("user")
+            .slot("topic")
+            .value("coding")
+            .source(0, None)
+            .engine("test", "1.0")
+            .build(0)
+            .unwrap();
+        mem.put_memory_card(card1).unwrap();
+
+        let card2 = MemoryCardBuilder::new()
+            .preference() // Kind::Preference
+            .entity("user")
+            .slot("likes")
+            .value("coding")
+            .source(1, None)
+            .engine("test", "1.0")
+            .build(1)
+            .unwrap();
+        mem.put_memory_card(card2).unwrap();
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // Filter by kind Fact
+    let fact_results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::default().with_kind(MemoryKind::Fact)],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(fact_results.hits.len(), 1, "Should find only fact doc");
+    assert_eq!(fact_results.hits[0].uri, "mv2://doc/fact");
+
+    // Filter by kind Preference
+    let pref_results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::default().with_kind(MemoryKind::Preference)],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert_eq!(
+        pref_results.hits.len(),
+        1,
+        "Should find only preference doc"
+    );
+    assert_eq!(pref_results.hits[0].uri, "mv2://doc/preference");
+}
+
+/// Test search with empty memory_filter (matches all cards).
+#[test]
+#[cfg(feature = "lex")]
+fn search_memory_filter_empty_matches_all() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    {
+        let mut mem = Memvid::create(&path).unwrap();
+        mem.enable_lex().unwrap();
+
+        // Create frames with and without memory cards
+        let opts1 = PutOptions {
+            uri: Some("mv2://doc/with-card".to_string()),
+            search_text: Some("Document with memory card about programming".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"With card", opts1).unwrap();
+
+        let opts2 = PutOptions {
+            uri: Some("mv2://doc/no-card".to_string()),
+            search_text: Some("Document without memory card about programming".to_string()),
+            ..Default::default()
+        };
+        mem.put_bytes_with_options(b"No card", opts2).unwrap();
+
+        // Only add memory card to first frame
+        let card = MemoryCardBuilder::new()
+            .fact()
+            .entity("test")
+            .slot("has_card")
+            .value("yes")
+            .source(0, None)
+            .engine("test", "1.0")
+            .build(0)
+            .unwrap();
+        mem.put_memory_card(card).unwrap();
+
+        mem.commit().unwrap();
+    }
+
+    let mut mem = Memvid::open(&path).unwrap();
+
+    // An empty MemoryFilter (all fields None) matches ALL memory cards,
+    // so only frames with at least one memory card are returned
+    let results = mem
+        .search(SearchRequest {
+            query: "programming".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            memory_filters: vec![MemoryFilter::all()], // Empty filter
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Should only find the frame that has a memory card
+    assert_eq!(
+        results.hits.len(),
+        1,
+        "Empty filter should match frames with any card"
+    );
+    assert_eq!(results.hits[0].uri, "mv2://doc/with-card");
+}
