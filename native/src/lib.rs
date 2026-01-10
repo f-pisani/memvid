@@ -77,7 +77,6 @@ fn memvid_to_napi_error(e: memvid_core::MemvidError) -> napi::Error {
     napi::Error::from_reason(format!("[{}] {}", code, message))
 }
 
-
 /// Wrap an operation with panic catching
 ///
 /// This is the FFI boundary panic safety layer. We catch all panics to prevent
@@ -104,14 +103,20 @@ fn u64_to_i64(val: u64) -> napi::Result<i64> {
 /// Safely convert i64 to usize, returning error on negative or overflow
 fn i64_to_usize(val: i64) -> napi::Result<usize> {
     usize::try_from(val).map_err(|_| {
-        napi::Error::from_reason(format!("[INTEGER_OVERFLOW] Cannot convert {} to usize", val))
+        napi::Error::from_reason(format!(
+            "[INTEGER_OVERFLOW] Cannot convert {} to usize",
+            val
+        ))
     })
 }
 
 /// Safely convert i32 to usize, returning error on negative values
 fn i32_to_usize(val: i32) -> napi::Result<usize> {
     usize::try_from(val).map_err(|_| {
-        napi::Error::from_reason(format!("[INTEGER_OVERFLOW] Cannot convert {} to usize (negative)", val))
+        napi::Error::from_reason(format!(
+            "[INTEGER_OVERFLOW] Cannot convert {} to usize (negative)",
+            val
+        ))
     })
 }
 
@@ -121,7 +126,9 @@ const MAX_EMBEDDING_DIM: usize = 65536;
 /// Validate embedding vector size to prevent DoS via memory exhaustion
 fn validate_embedding_size(embedding: &[f64]) -> napi::Result<()> {
     if embedding.is_empty() {
-        return Err(napi::Error::from_reason("[INVALID_INPUT] Embedding cannot be empty"));
+        return Err(napi::Error::from_reason(
+            "[INVALID_INPUT] Embedding cannot be empty",
+        ));
     }
     if embedding.len() > MAX_EMBEDDING_DIM {
         return Err(napi::Error::from_reason(format!(
@@ -344,9 +351,9 @@ impl MemvidHandle {
                 self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
                 napi::Error::from_reason(format!("Lock poisoned, handle invalidated: {}", e))
             })?;
-            let memvid = guard.as_mut().ok_or_else(|| {
-                napi::Error::from_reason("Handle is closed")
-            })?;
+            let memvid = guard
+                .as_mut()
+                .ok_or_else(|| napi::Error::from_reason("Handle is closed"))?;
             f(memvid)
         }))
     }
@@ -506,7 +513,11 @@ impl MemvidHandle {
     /// Returns the top_k most similar frames to the query embedding.
     /// Requires vec index to be enabled.
     #[napi]
-    pub fn vec_search(&self, query_embedding: Vec<f64>, top_k: Option<i32>) -> napi::Result<SearchResult> {
+    pub fn vec_search(
+        &self,
+        query_embedding: Vec<f64>,
+        top_k: Option<i32>,
+    ) -> napi::Result<SearchResult> {
         // Validate inputs before entering closure
         validate_embedding_size(&query_embedding)?;
         let limit = i32_to_usize(top_k.unwrap_or(10))?;
@@ -514,7 +525,9 @@ impl MemvidHandle {
             // Convert f64 to f32
             let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
-            let vec_hits = memvid.search_vec(&query_f32, limit).map_err(memvid_to_napi_error)?;
+            let vec_hits = memvid
+                .search_vec(&query_f32, limit)
+                .map_err(memvid_to_napi_error)?;
 
             let hits: napi::Result<Vec<SearchHit>> = vec_hits
                 .into_iter()
@@ -557,7 +570,10 @@ impl MemvidHandle {
 
     /// Get timeline entries (chronological view of frames)
     #[napi]
-    pub fn timeline(&self, options: Option<TimelineOptions>) -> napi::Result<Vec<TimelineEntryResult>> {
+    pub fn timeline(
+        &self,
+        options: Option<TimelineOptions>,
+    ) -> napi::Result<Vec<TimelineEntryResult>> {
         let opts = options.unwrap_or_default();
         // Validate limit before entering closure
         let validated_limit = if let Some(limit) = opts.limit {
@@ -666,7 +682,11 @@ impl MemvidHandle {
             }
 
             let frame_id = memvid
-                .put_with_embedding_and_options(&content_vec, embedding_f32.clone(), put_opts.build())
+                .put_with_embedding_and_options(
+                    &content_vec,
+                    embedding_f32.clone(),
+                    put_opts.build(),
+                )
                 .map_err(memvid_to_napi_error)?;
 
             u64_to_i64(frame_id)
@@ -701,7 +721,9 @@ impl MemvidHandle {
 fn validate_path(path: &str) -> napi::Result<std::path::PathBuf> {
     // Check for null bytes
     if path.contains('\0') {
-        return Err(napi::Error::from_reason("[INVALID_PATH] Path contains null bytes"));
+        return Err(napi::Error::from_reason(
+            "[INVALID_PATH] Path contains null bytes",
+        ));
     }
 
     let path_buf = std::path::PathBuf::from(path);
@@ -710,7 +732,7 @@ fn validate_path(path: &str) -> napi::Result<std::path::PathBuf> {
     for component in path_buf.components() {
         if let std::path::Component::ParentDir = component {
             return Err(napi::Error::from_reason(
-                "[INVALID_PATH] Path traversal not allowed: '..' in path"
+                "[INVALID_PATH] Path traversal not allowed: '..' in path",
             ));
         }
     }
@@ -720,7 +742,7 @@ fn validate_path(path: &str) -> napi::Result<std::path::PathBuf> {
         Some(ext) if ext == "mv2" => {}
         _ => {
             return Err(napi::Error::from_reason(
-                "[INVALID_PATH] File must have .mv2 extension"
+                "[INVALID_PATH] File must have .mv2 extension",
             ));
         }
     }
@@ -733,7 +755,7 @@ fn validate_path(path: &str) -> napi::Result<std::path::PathBuf> {
             Ok(metadata) => {
                 if metadata.file_type().is_symlink() {
                     return Err(napi::Error::from_reason(
-                        "[INVALID_PATH] Cannot create file: path is a symlink"
+                        "[INVALID_PATH] Cannot create file: path is a symlink",
                     ));
                 }
             }
@@ -765,7 +787,7 @@ fn validate_path_for_open(path: &str) -> napi::Result<std::path::PathBuf> {
             match canonical.extension() {
                 Some(ext) if ext == "mv2" => Ok(canonical),
                 _ => Err(napi::Error::from_reason(
-                    "[INVALID_PATH] Symlink target must have .mv2 extension"
+                    "[INVALID_PATH] Symlink target must have .mv2 extension",
                 )),
             }
         }

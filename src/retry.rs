@@ -127,11 +127,7 @@ where
         .retry(backoff)
         .when(|e| is_transient(e))
         .notify(|err, dur| {
-            tracing::debug!(
-                "Transient error, retrying after {:?}: {}",
-                dur,
-                err
-            );
+            tracing::debug!("Transient error, retrying after {:?}: {}", dur, err);
         })
         .call()
 }
@@ -232,7 +228,9 @@ mod tests {
 
         // Test Tantivy error with sharing violation
         let err = MemvidError::Tantivy {
-            reason: "The process cannot access the file because it is being used by another process".into(),
+            reason:
+                "The process cannot access the file because it is being used by another process"
+                    .into(),
         };
         assert!(is_transient(&err));
 
