@@ -88,8 +88,25 @@
 
 ### Files Modified
 - `native/src/lib.rs` - Added all NAPI bindings (~900 lines of new code)
-- `native/__tests__/advanced.test.ts` - Added comprehensive tests (42 tests)
+- `native/Cargo.toml` - Enabled encryption feature by default
 - Various Rust source files - Minor clippy fixes
+
+### Test Files
+Tests organized by feature:
+- `native/__tests__/memory-cards.test.ts` - Memory card operations
+- `native/__tests__/hybrid-search.test.ts` - Hybrid/adaptive search tests
+- `native/__tests__/documents.test.ts` - Document processing tests
+- `native/__tests__/diagnostics.test.ts` - Update/doctor operations
+
+### Examples Added
+Comprehensive examples with detailed documentation:
+- `native/examples/memory-cards.ts` - Structured fact storage for AI agents
+- `native/examples/hybrid-search.ts` - Combined lexical + vector search
+- `native/examples/document-ingestion.ts` - PDF/DOCX processing
+- `native/examples/tables.ts` - Table extraction from PDFs
+- `native/examples/encryption.ts` - File security operations
+- `native/examples/file-maintenance.ts` - Verify/doctor/repair workflows
+- `native/examples/README.md` - Usage guide and common patterns
 
 ### New Bindings Added
 
