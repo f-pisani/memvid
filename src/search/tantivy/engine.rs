@@ -1,20 +1,71 @@
 use super::query;
 use super::schema::{build_schema, initialise_tokenizer};
 use super::util::to_search_value;
+use crate::retry::{RetryConfig, retry_transient};
 use crate::search::parser::ParsedQuery;
 use crate::types::{Frame, FrameId};
 use crate::{MemvidError, Result};
 use blake3::{Hasher, hash};
+use std::mem::ManuallyDrop;
+use std::path::Path;
 use tantivy::collector::TopDocs;
 use tantivy::indexer::IndexWriter;
 use tantivy::schema::{Field, OwnedValue, Schema, TantivyDocument};
 use tantivy::{Index, IndexReader, Term, doc};
 use tempfile::TempDir;
 
+/// Read a file's contents with proper sharing flags for Windows compatibility.
+///
+/// On Windows, memory-mapped files (like those used by Tantivy) cannot be read
+/// using `std::fs::read()` because it opens files without sharing flags. This
+/// causes "Access is denied (os error 5)" errors when reading segment files
+/// that Tantivy has open via mmap.
+///
+/// This function uses `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`
+/// on Windows to allow reading files that are memory-mapped by other handles.
+#[cfg(windows)]
+fn read_file_shared(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::fs::OpenOptions;
+    use std::io::Read;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    // FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE = 0x7
+    const FILE_SHARE_ALL: u32 = 0x1 | 0x2 | 0x4;
+
+    let mut file = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_ALL)
+        .open(path)?;
+
+    let mut contents = Vec::new();
+    file.read_to_end(&mut contents)?;
+    Ok(contents)
+}
+
+/// Read a file's contents - standard implementation for non-Windows platforms.
+#[cfg(not(windows))]
+fn read_file_shared(path: &Path) -> std::io::Result<Vec<u8>> {
+    std::fs::read(path)
+}
+
 /// Tantivy-backed search index used when the `lex` feature is enabled.
+///
+/// IMPORTANT: Windows compatibility requires careful drop order management.
+/// Tantivy uses mmap which holds exclusive file locks on Windows.
+/// When TempDir::drop() tries to delete files that are still mmaped,
+/// Windows returns "Access is denied (os error 5)".
+///
+/// Solution: Use ManuallyDrop for the Index and IndexReader so we can
+/// explicitly drop them in our Drop impl BEFORE TempDir cleanup.
+/// The custom Drop impl ensures all mmap handles are released first.
 pub struct TantivyEngine {
-    pub(super) work_dir: TempDir,
-    pub(super) index: Index,
+    // IndexWriter wrapped in Option so we can take() it in Drop
+    pub(super) index_writer: Option<IndexWriter>,
+    // ManuallyDrop allows us to control when these are dropped
+    // We drop them explicitly in Drop impl before TempDir cleanup
+    pub(super) reader: ManuallyDrop<IndexReader>,
+    pub(super) index: ManuallyDrop<Index>,
+    // Schema and field handles - no file handles
     pub(super) _schema: Schema,
     pub(super) content: Field,
     pub(super) tags: Field,
@@ -23,9 +74,9 @@ pub struct TantivyEngine {
     pub(super) timestamp: Field,
     pub(super) uri: Field,
     pub(super) frame_id: Field,
-    pub(super) index_writer: Option<IndexWriter>,
-    pub(super) reader: IndexReader,
     pub(super) tokenizer: Option<String>,
+    // TempDir is dropped last (after ManuallyDrop fields are explicitly dropped)
+    pub(super) work_dir: TempDir,
 }
 
 /// Search hit returned from Tantivy queries.
@@ -120,8 +171,11 @@ impl TantivyEngine {
         })?;
 
         Ok(Self {
-            work_dir: dir,
-            index,
+            index_writer: Some(writer),
+            // Wrap in ManuallyDrop for explicit drop control on Windows
+            reader: ManuallyDrop::new(reader),
+            index: ManuallyDrop::new(index),
+            // Schema and field handles
             _schema: schema,
             content,
             tags,
@@ -130,9 +184,9 @@ impl TantivyEngine {
             timestamp,
             uri,
             frame_id,
-            index_writer: Some(writer),
-            reader,
             tokenizer: Some("memvid_default".to_string()),
+            // TempDir is dropped after ManuallyDrop fields in custom Drop impl
+            work_dir: dir,
         })
     }
 
@@ -197,19 +251,33 @@ impl TantivyEngine {
 
     pub fn commit(&mut self) -> Result<()> {
         let mut writer = self.take_writer()?;
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
+
+        // wait_merging_threads() consumes the writer and waits for background merge
+        // threads to complete. It can't be retried since it takes ownership.
+        // File I/O errors from merges are reported here but the work is done.
         writer
             .wait_merging_threads()
             .map_err(|err| MemvidError::Tantivy {
                 reason: err.to_string(),
             })?;
         self.index_writer = Some(self.create_writer()?);
-        self.reader.reload().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
-        })?;
+        self.reload_reader()?;
         Ok(())
+    }
+
+    /// Reload the reader with retry logic for transient file access failures on Windows.
+    fn reload_reader(&self) -> Result<()> {
+        retry_transient(RetryConfig::for_tantivy(), || {
+            self.reader.reload().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
+        })
     }
 
     /// Soft commit that makes documents searchable immediately without waiting for merge.
@@ -217,14 +285,16 @@ impl TantivyEngine {
     /// This is faster than full commit() but leaves segments unmerged.
     pub fn soft_commit(&mut self) -> Result<()> {
         let writer = self.writer_mut()?;
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
+
         // Don't wait for merge threads - let them run in background
         // Reload reader to make new documents searchable immediately
-        self.reader.reload().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
-        })?;
+        self.reload_reader()?;
         Ok(())
     }
 
@@ -247,18 +317,21 @@ impl TantivyEngine {
             .map_err(|err| MemvidError::Tantivy {
                 reason: err.to_string(),
             })?;
-        writer.commit().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
+
+        retry_transient(RetryConfig::for_tantivy(), || {
+            writer.commit().map_err(|err| MemvidError::Tantivy {
+                reason: err.to_string(),
+            })
         })?;
+
+        // wait_merging_threads() consumes the writer - can't be retried
         writer
             .wait_merging_threads()
             .map_err(|err| MemvidError::Tantivy {
                 reason: err.to_string(),
             })?;
         self.index_writer = Some(self.create_writer()?);
-        self.reader.reload().map_err(|err| MemvidError::Tantivy {
-            reason: err.to_string(),
-        })?;
+        self.reload_reader()?;
         Ok(())
     }
 
@@ -362,7 +435,8 @@ impl TantivyEngine {
 
         for name in file_names {
             let path = self.work_dir.path().join(&name);
-            let bytes = std::fs::read(&path).map_err(|err| MemvidError::Tantivy {
+            // Use read_file_shared for Windows compatibility with mmap'd files
+            let bytes = read_file_shared(&path).map_err(|err| MemvidError::Tantivy {
                 reason: format!("failed to read Tantivy segment {}: {}", path.display(), err),
             })?;
             let checksum = *hash(&bytes).as_bytes();
@@ -403,5 +477,51 @@ impl TantivyEngine {
 
     pub fn num_docs(&self) -> u64 {
         self.reader.searcher().num_docs()
+    }
+}
+
+impl Drop for TantivyEngine {
+    fn drop(&mut self) {
+        // CRITICAL: Windows compatibility requires explicit drop ordering.
+        //
+        // On Windows, Tantivy uses mmap which holds exclusive file locks.
+        // When TempDir::drop() tries to delete files that are still mmaped,
+        // Windows returns "Access is denied (os error 5)".
+        //
+        // We MUST drop all Tantivy components that hold mmap handles BEFORE
+        // the TempDir is dropped. The order is:
+        // 1. IndexWriter - has background merge threads that hold file handles
+        // 2. IndexReader - holds mmap handles via its Searcher
+        // 3. Index - holds directory handles
+        // 4. TempDir - can now safely delete all files
+
+        // Step 1: Take and properly shut down the IndexWriter
+        if let Some(writer) = self.index_writer.take() {
+            // wait_merging_threads() consumes the writer and blocks until all
+            // background merge operations complete, releasing all file handles.
+            if let Err(err) = writer.wait_merging_threads() {
+                tracing::warn!(
+                    "TantivyEngine drop: failed to wait for merging threads: {}",
+                    err
+                );
+            }
+        }
+
+        // Step 2: Explicitly drop the IndexReader to release its mmap handles
+        // SAFETY: We own the ManuallyDrop and this is the only place we drop it.
+        // After this, self.reader is in an undefined state, but that's OK since
+        // we're in Drop and won't access it again.
+        unsafe {
+            ManuallyDrop::drop(&mut self.reader);
+        }
+
+        // Step 3: Explicitly drop the Index to release directory handles
+        // SAFETY: Same as above - we own it and this is the only drop point.
+        unsafe {
+            ManuallyDrop::drop(&mut self.index);
+        }
+
+        // Step 4: TempDir (work_dir) will be dropped automatically after this
+        // function returns, and all file handles are now released.
     }
 }

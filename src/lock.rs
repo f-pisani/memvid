@@ -3,7 +3,7 @@ use std::path::Path;
 use std::thread;
 use std::time::Duration;
 
-use fs2::FileExt;
+use fs2::{FileExt, lock_contended_error};
 
 use crate::error::{MemvidError, Result};
 
@@ -49,8 +49,16 @@ impl FileLock {
     }
 
     /// Attempts a non-blocking exclusive lock, returning None if already locked.
-    pub fn try_acquire(_file: &File, path: &Path) -> Result<Option<Self>> {
-        let clone = OpenOptions::new().read(true).write(true).open(path)?;
+    ///
+    /// IMPORTANT: We must clone the file handle rather than opening a new one.
+    /// On Windows, exclusive locks acquired on a separately-opened handle block
+    /// all other handles (even in the same process) from accessing the file.
+    /// By cloning, we share the same underlying OS file object, which allows
+    /// both handles to access the file while the lock is held.
+    pub fn try_acquire(file: &File, _path: &Path) -> Result<Option<Self>> {
+        let clone = file.try_clone()?;
+        let contended_kind = lock_contended_error().kind();
+
         loop {
             match clone.try_lock_exclusive() {
                 Ok(()) => {
@@ -60,7 +68,7 @@ impl FileLock {
                     }));
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => return Ok(None),
+                Err(err) if err.kind() == contended_kind => return Ok(None),
                 Err(err) => return Err(MemvidError::Lock(err.to_string())),
             }
         }
@@ -128,6 +136,7 @@ impl FileLock {
     fn lock_with_retry(file: &File, mode: LockMode) -> Result<()> {
         const MAX_ATTEMPTS: u32 = 200; // ~10 seconds with 50ms backoff
         const BACKOFF: Duration = Duration::from_millis(50);
+        let contended_kind = lock_contended_error().kind();
         let mut attempts = 0;
         loop {
             let result = match mode {
@@ -138,7 +147,7 @@ impl FileLock {
             match result {
                 Ok(()) => return Ok(()),
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
-                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                Err(err) if err.kind() == contended_kind => {
                     if attempts >= MAX_ATTEMPTS {
                         return Err(MemvidError::Lock(
                             "exclusive access unavailable; file is in use by another process"
@@ -175,18 +184,26 @@ mod tests {
         let path = temp.path();
         writeln!(&mut temp.as_file().try_clone().unwrap(), "seed").unwrap();
 
-        let file = OpenOptions::new()
+        // First handle acquires the lock
+        let file1 = OpenOptions::new()
             .read(true)
             .write(true)
             .open(path)
-            .expect("open file");
-        let guard = FileLock::acquire(&file, path).expect("first lock succeeds");
+            .expect("open file 1");
+        let guard = FileLock::acquire(&file1, path).expect("first lock succeeds");
 
-        let second = FileLock::try_acquire(&file, path).expect("second lock attempt");
+        // Second handle (separate open, simulating another process) should be blocked
+        let file2 = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path)
+            .expect("open file 2");
+        let second = FileLock::try_acquire(&file2, path).expect("second lock attempt");
         assert!(second.is_none(), "lock should already be held");
 
+        // After dropping the first lock, third attempt should succeed
         drop(guard);
-        let third = FileLock::try_acquire(&file, path).expect("third lock attempt");
+        let third = FileLock::try_acquire(&file2, path).expect("third lock attempt");
         assert!(third.is_some(), "lock released after drop");
     }
 }
