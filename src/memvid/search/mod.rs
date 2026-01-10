@@ -103,31 +103,25 @@ impl Memvid {
             cursor: request.cursor.clone(),
         };
 
+        // Helper closure to create empty response with current elapsed time
+        let mk_empty = || {
+            empty_search_response(
+                request.query.clone(),
+                params.clone(),
+                start_time.elapsed().as_millis(),
+                SearchEngineKind::Tantivy,
+            )
+        };
+
         let date_range = parsed.required_date_range();
         #[allow(unused_mut)]
         let mut candidate_filter: Option<HashSet<FrameId>> = if let Some(ref range) = date_range {
             if range.is_empty() {
-                let elapsed = start_time.elapsed().as_millis();
-                return Ok(empty_search_response(
-                    request.query.clone(),
-                    params.clone(),
-                    elapsed,
-                    SearchEngineKind::Tantivy,
-                ));
+                return Ok(mk_empty());
             }
             match frame_ids_in_date_range(self, range)? {
-                Some(ids) => {
-                    if ids.is_empty() {
-                        let elapsed = start_time.elapsed().as_millis();
-                        return Ok(empty_search_response(
-                            request.query.clone(),
-                            params.clone(),
-                            elapsed,
-                            SearchEngineKind::Tantivy,
-                        ));
-                    }
-                    Some(ids.into_iter().collect())
-                }
+                Some(ids) if ids.is_empty() => return Ok(mk_empty()),
+                Some(ids) => Some(ids.into_iter().collect()),
                 None => None,
             }
         } else {
@@ -141,22 +135,10 @@ impl Memvid {
                     time_filter::frame_ids_for_temporal_filter(self, temporal_filter)?
                 {
                     if ids.is_empty() {
-                        return Ok(empty_search_response(
-                            request.query.clone(),
-                            params.clone(),
-                            start_time.elapsed().as_millis(),
-                            SearchEngineKind::Tantivy,
-                        ));
+                        return Ok(mk_empty());
                     }
                     match intersect_filter(candidate_filter, ids.into_iter().collect()) {
-                        FilterResult::Empty => {
-                            return Ok(empty_search_response(
-                                request.query.clone(),
-                                params.clone(),
-                                start_time.elapsed().as_millis(),
-                                SearchEngineKind::Tantivy,
-                            ));
-                        }
+                        FilterResult::Empty => return Ok(mk_empty()),
                         FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
                     }
                 }
@@ -167,22 +149,10 @@ impl Memvid {
         if request.as_of_frame.is_some() || request.as_of_ts.is_some() {
             let replay_ids = self.get_replay_frame_ids(&request)?;
             if replay_ids.is_empty() {
-                return Ok(empty_search_response(
-                    request.query.clone(),
-                    params.clone(),
-                    start_time.elapsed().as_millis(),
-                    SearchEngineKind::Tantivy,
-                ));
+                return Ok(mk_empty());
             }
             match intersect_filter(candidate_filter, replay_ids.into_iter().collect()) {
-                FilterResult::Empty => {
-                    return Ok(empty_search_response(
-                        request.query.clone(),
-                        params.clone(),
-                        start_time.elapsed().as_millis(),
-                        SearchEngineKind::Tantivy,
-                    ));
-                }
+                FilterResult::Empty => return Ok(mk_empty()),
                 FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
             }
         }
@@ -205,23 +175,11 @@ impl Memvid {
             );
 
             if memory_frame_ids.is_empty() {
-                return Ok(empty_search_response(
-                    request.query.clone(),
-                    params.clone(),
-                    start_time.elapsed().as_millis(),
-                    SearchEngineKind::Tantivy,
-                ));
+                return Ok(mk_empty());
             }
 
             match intersect_filter(candidate_filter, memory_frame_ids) {
-                FilterResult::Empty => {
-                    return Ok(empty_search_response(
-                        request.query.clone(),
-                        params.clone(),
-                        start_time.elapsed().as_millis(),
-                        SearchEngineKind::Tantivy,
-                    ));
-                }
+                FilterResult::Empty => return Ok(mk_empty()),
                 FilterResult::Candidates(filtered) => candidate_filter = Some(filtered),
             }
         }

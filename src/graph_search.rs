@@ -305,46 +305,52 @@ impl<'a> GraphMatcher<'a> {
     }
 }
 
+/// Create a basic search request with default options.
+fn basic_search_request(query: &str, top_k: usize) -> SearchRequest {
+    SearchRequest {
+        query: query.to_string(),
+        top_k,
+        snippet_chars: 200,
+        uri: None,
+        scope: None,
+        cursor: None,
+        #[cfg(feature = "temporal_track")]
+        temporal: None,
+        as_of_frame: None,
+        as_of_ts: None,
+        no_sketch: false,
+        exclude_frame_ids: Vec::new(),
+        exclude_uris: Vec::new(),
+        memory_filters: Vec::new(),
+    }
+}
+
+/// Convert search hits to hybrid search hits (vector-only mode).
+fn search_hits_to_hybrid(hits: &[crate::types::SearchHit]) -> Vec<HybridSearchHit> {
+    hits.iter()
+        .map(|h| {
+            let score = h.score.unwrap_or(0.0);
+            HybridSearchHit {
+                frame_id: h.frame_id,
+                score,
+                graph_score: 0.0,
+                vector_score: score,
+                matched_entity: None,
+                preview: Some(h.text.clone()),
+            }
+        })
+        .collect()
+}
+
 /// Execute a hybrid search: graph filter + vector ranking.
 pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<HybridSearchHit>> {
     match plan {
         QueryPlan::VectorOnly {
             query_text, top_k, ..
         } => {
-            // Fall back to regular lexical search
             let query = query_text.as_deref().unwrap_or("");
-            let request = SearchRequest {
-                query: query.to_string(),
-                top_k: *top_k,
-                snippet_chars: 200,
-                uri: None,
-                scope: None,
-                cursor: None,
-                #[cfg(feature = "temporal_track")]
-                temporal: None,
-                as_of_frame: None,
-                as_of_ts: None,
-                no_sketch: false,
-                exclude_frame_ids: Vec::new(),
-                exclude_uris: Vec::new(),
-                memory_filters: Vec::new(),
-            };
-            let response = memvid.search(request)?;
-            Ok(response
-                .hits
-                .iter()
-                .map(|h| {
-                    let score = h.score.unwrap_or(0.0);
-                    HybridSearchHit {
-                        frame_id: h.frame_id,
-                        score,
-                        graph_score: 0.0,
-                        vector_score: score,
-                        matched_entity: None,
-                        preview: Some(h.text.clone()),
-                    }
-                })
-                .collect())
+            let response = memvid.search(basic_search_request(query, *top_k))?;
+            Ok(search_hits_to_hybrid(&response.hits))
         }
 
         QueryPlan::GraphOnly { pattern, limit } => {
@@ -380,38 +386,8 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
             if candidate_frames.is_empty() {
                 // No graph matches - fall back to lexical search
                 let query = query_text.as_deref().unwrap_or("");
-                let request = SearchRequest {
-                    query: query.to_string(),
-                    top_k: *top_k,
-                    snippet_chars: 200,
-                    uri: None,
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
-                };
-                let response = memvid.search(request)?;
-                return Ok(response
-                    .hits
-                    .iter()
-                    .map(|h| {
-                        let score = h.score.unwrap_or(0.0);
-                        HybridSearchHit {
-                            frame_id: h.frame_id,
-                            score,
-                            graph_score: 0.0,
-                            vector_score: score,
-                            matched_entity: None,
-                            preview: Some(h.text.clone()),
-                        }
-                    })
-                    .collect());
+                let response = memvid.search(basic_search_request(query, *top_k))?;
+                return Ok(search_hits_to_hybrid(&response.hits));
             }
 
             // Step 2: Return graph matches directly with frame previews
