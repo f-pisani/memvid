@@ -84,6 +84,49 @@ function validatePositiveInt(value: unknown, name: string): number | undefined {
 }
 
 /**
+ * Parse search options from either a number (legacy topK) or SearchOptions object
+ */
+interface ParsedSearchOptions {
+  limit: number | undefined;
+  uri: string | undefined;
+  scope: string | undefined;
+  excludeIds: number[] | undefined;
+  excludeUris: string[] | undefined;
+  memoryFilters: MemoryFilter[] | undefined;
+}
+
+function parseSearchOptions(options?: SearchOptions | number): ParsedSearchOptions {
+  if (typeof options === 'number') {
+    return {
+      limit: options,
+      uri: undefined,
+      scope: undefined,
+      excludeIds: undefined,
+      excludeUris: undefined,
+      memoryFilters: undefined,
+    };
+  }
+  if (options) {
+    return {
+      limit: options.topK,
+      uri: options.uri,
+      scope: options.scope,
+      excludeIds: options.excludeFrameIds,
+      excludeUris: options.excludeUris,
+      memoryFilters: options.memoryFilters,
+    };
+  }
+  return {
+    limit: undefined,
+    uri: undefined,
+    scope: undefined,
+    excludeIds: undefined,
+    excludeUris: undefined,
+    memoryFilters: undefined,
+  };
+}
+
+/**
  * Validate content buffer
  */
 function validateContent(content: unknown): Buffer {
@@ -396,29 +439,9 @@ export class Memvid {
       throw new MemvidError('INVALID_INPUT', 'query must be a string');
     }
 
-    // Support both old signature (query, topK) and new signature (query, options)
-    let limit: number | undefined;
-    let uri: string | undefined;
-    let scope: string | undefined;
-    let excludeIds: number[] | undefined;
-    let excludeUris: string[] | undefined;
-    let memoryFilters: MemoryFilter[] | undefined;
-
-    if (typeof options === 'number') {
-      // Old signature: find(query, topK)
-      limit = options;
-    } else if (options) {
-      // New signature: find(query, options)
-      limit = options.topK;
-      uri = options.uri;
-      scope = options.scope;
-      excludeIds = options.excludeFrameIds;
-      excludeUris = options.excludeUris;
-      memoryFilters = options.memoryFilters;
-    }
+    const { limit, uri, scope, excludeIds, excludeUris, memoryFilters } = parseSearchOptions(options);
 
     try {
-      // Call native function with individual parameters
       return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris, memoryFilters) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
@@ -449,28 +472,9 @@ export class Memvid {
    */
   vecSearch(queryEmbedding: number[], options?: SearchOptions | number): SearchResult {
     const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
-
-    // Support both old signature (embedding, topK) and new signature (embedding, options)
-    let limit: number | undefined;
-    let uri: string | undefined;
-    let scope: string | undefined;
-    let excludeIds: number[] | undefined;
-    let excludeUris: string[] | undefined;
-
-    if (typeof options === 'number') {
-      // Old signature: vecSearch(embedding, topK)
-      limit = options;
-    } else if (options) {
-      // New signature: vecSearch(embedding, options)
-      limit = options.topK;
-      uri = options.uri;
-      scope = options.scope;
-      excludeIds = options.excludeFrameIds;
-      excludeUris = options.excludeUris;
-    }
+    const { limit, uri, scope, excludeIds, excludeUris } = parseSearchOptions(options);
 
     try {
-      // Call native function with individual parameters
       return this.handle.vecSearch(validEmbedding, limit, uri, scope, excludeIds, excludeUris) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);

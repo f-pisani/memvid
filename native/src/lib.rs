@@ -784,6 +784,28 @@ fn memory_card_input_to_rust(input: MemoryCardInput) -> napi::Result<MemoryCard>
     })
 }
 
+/// Build memvid-core PutOptions from NAPI PutOptions
+fn build_put_options(opts: &PutOptions) -> memvid_core::PutOptions {
+    let mut put_opts = memvid_core::PutOptions::builder();
+
+    if let Some(ref title) = opts.title {
+        put_opts = put_opts.title(title);
+    }
+    if let Some(ref uri) = opts.uri {
+        put_opts = put_opts.uri(uri);
+    }
+    if let Some(ref kind) = opts.kind {
+        put_opts = put_opts.kind(kind);
+    }
+    if let Some(ref labels) = opts.labels {
+        for label in labels {
+            put_opts = put_opts.label(label);
+        }
+    }
+
+    put_opts.build()
+}
+
 /// Convert a Rust MemoryCard to MemoryCardResult
 fn memory_card_to_result(card: &MemoryCard) -> napi::Result<MemoryCardResult> {
     Ok(MemoryCardResult {
@@ -923,28 +945,11 @@ impl MemvidHandle {
     pub fn put(&self, content: Buffer, options: Option<PutOptions>) -> napi::Result<i64> {
         let content_vec = content.to_vec();
         let opts = options.unwrap_or_default();
+        let put_opts = build_put_options(&opts);
         self.with_memvid(move |memvid| {
-            let mut put_opts = memvid_core::PutOptions::builder();
-
-            if let Some(title) = opts.title {
-                put_opts = put_opts.title(title);
-            }
-            if let Some(uri) = opts.uri {
-                put_opts = put_opts.uri(uri);
-            }
-            if let Some(kind) = opts.kind {
-                put_opts = put_opts.kind(kind);
-            }
-            if let Some(labels) = opts.labels {
-                for label in labels {
-                    put_opts = put_opts.label(label);
-                }
-            }
-
             let frame_id = memvid
-                .put_bytes_with_options(&content_vec, put_opts.build())
+                .put_bytes_with_options(&content_vec, put_opts)
                 .map_err(memvid_to_napi_error)?;
-
             u64_to_i64(frame_id)
         })
     }
@@ -1664,35 +1669,16 @@ impl MemvidHandle {
         embedding: Vec<f64>,
         options: Option<PutOptions>,
     ) -> napi::Result<i64> {
-        // Validate embedding size to prevent DoS
         validate_embedding_size(&embedding)?;
         let content_vec = content.to_vec();
         let opts = options.unwrap_or_default();
-        // Convert f64 to f32 for Rust
+        let put_opts = build_put_options(&opts);
         let embedding_f32: Vec<f32> = embedding.iter().map(|&x| x as f32).collect();
 
         self.with_memvid(move |memvid| {
-            let mut put_opts = memvid_core::PutOptions::builder();
-
-            if let Some(title) = opts.title {
-                put_opts = put_opts.title(title);
-            }
-            if let Some(uri) = opts.uri {
-                put_opts = put_opts.uri(uri);
-            }
-            if let Some(kind) = opts.kind {
-                put_opts = put_opts.kind(kind);
-            }
-            if let Some(labels) = opts.labels {
-                for label in labels {
-                    put_opts = put_opts.label(label);
-                }
-            }
-
             let frame_id = memvid
-                .put_with_embedding_and_options(&content_vec, embedding_f32, put_opts.build())
+                .put_with_embedding_and_options(&content_vec, embedding_f32, put_opts)
                 .map_err(memvid_to_napi_error)?;
-
             u64_to_i64(frame_id)
         })
     }
