@@ -365,7 +365,7 @@ impl MemvidHandle {
     }
 
     /// Check if handle is closed
-    #[napi]
+    #[napi(js_name = "isClosed")]
     pub fn is_closed(&self) -> bool {
         self.closed.load(std::sync::atomic::Ordering::SeqCst)
     }
