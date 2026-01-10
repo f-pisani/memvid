@@ -235,6 +235,8 @@ impl<'a> ReplayEngine<'a> {
                             as_of_frame: None,
                             as_of_ts: None,
                             no_sketch: false,
+                            exclude_frame_ids: Vec::new(),
+                            exclude_uris: Vec::new(),
                         };
                         match self.mem.search(search_request) {
                             Ok(response) => {

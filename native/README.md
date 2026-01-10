@@ -175,24 +175,45 @@ Enable vector similarity search index. Must be called before using `vecSearch()`
 mem.enableVec();
 ```
 
-##### `find(query: string, topK?: number): SearchResult`
+##### `find(query: string, options?: SearchOptions | number): SearchResult`
 
-Full-text search.
+Full-text search with optional filtering.
 
 ```typescript
+// Simple usage (just topK)
 const results = mem.find('search query', 10);
+
+// With filter options
+const filtered = mem.find('AI', {
+  topK: 10,
+  uri: 'doc://specific',           // Exact URI match
+  scope: 'doc://articles/',        // URI prefix match
+  excludeFrameIds: [0, 1, 2],      // Exclude specific frames
+  excludeUris: ['doc://skip-me'],  // Exclude specific URIs
+});
+
 for (const hit of results.hits) {
   console.log(hit.text, hit.score, hit.frameId);
 }
 ```
 
-##### `vecSearch(queryEmbedding: number[], topK?: number, maxDistance?: number): SearchResult`
+##### `vecSearch(queryEmbedding: number[], options?: SearchOptions | number): SearchResult`
 
-Vector similarity search.
+Vector similarity search with optional filtering.
 
 ```typescript
 const queryVec = await embedder.embedQuery('semantic query');
-const results = mem.vecSearch(queryVec, 5, 1.5); // top 5, max distance 1.5
+
+// Simple usage
+const results = mem.vecSearch(queryVec, 5);
+
+// With filter options
+const filtered = mem.vecSearch(queryVec, {
+  topK: 10,
+  scope: 'doc://articles/',        // Only search within scope
+  excludeFrameIds: [0, 1, 2],      // Exclude specific frames
+  excludeUris: ['doc://skip-me'],  // Exclude specific URIs
+});
 
 for (const hit of results.hits) {
   console.log(hit.text, hit.score); // score = distance (lower is better)
@@ -346,13 +367,25 @@ interface PutOptions {
 }
 ```
 
+#### SearchOptions
+
+```typescript
+interface SearchOptions {
+  topK?: number;           // Max results to return (default: 10)
+  uri?: string;            // Filter to exact URI match
+  scope?: string;          // Filter to URI prefix
+  excludeFrameIds?: number[];  // Exclude specific frame IDs
+  excludeUris?: string[];  // Exclude specific URIs
+}
+```
+
 #### SearchResult
 
 ```typescript
 interface SearchResult {
   totalHits: number;
   hits: SearchHit[];
-  engine: string;      // 'lex' or 'vec'
+  engine: string;      // 'Tantivy' or 'Vec'
   cursor?: string;     // For pagination
 }
 

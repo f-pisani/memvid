@@ -307,6 +307,7 @@ pub struct SearchResult {
     pub cursor: Option<String>,
 }
 
+
 // ============================================================================
 // MemvidHandle - Thread-safe wrapper
 // ============================================================================
@@ -443,21 +444,41 @@ impl MemvidHandle {
     }
 
     /// Search for documents
+    ///
+    /// Supports filtering by URI, scope, and exclusions.
     #[napi]
-    pub fn find(&self, query: String, top_k: Option<i32>) -> napi::Result<SearchResult> {
-        // Validate top_k before entering closure to avoid move issues
-        let top_k_usize = i32_to_usize(top_k.unwrap_or(10))?;
+    pub fn find(
+        &self,
+        query: String,
+        limit: Option<i32>,
+        uri: Option<String>,
+        scope: Option<String>,
+        exclude_ids: Option<Vec<i64>>,
+        exclude_uris: Option<Vec<String>>,
+    ) -> napi::Result<SearchResult> {
+        // Validate limit before entering closure to avoid move issues
+        let top_k_usize = i32_to_usize(limit.unwrap_or(10))?;
+        // Convert exclude_ids from i64 to u64
+        let exclude_frame_ids: Vec<u64> = exclude_ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|id| if id >= 0 { Some(id as u64) } else { None })
+            .collect();
+        let exclude_uris = exclude_uris.unwrap_or_default();
+
         self.with_memvid(move |memvid| {
             let request = memvid_core::SearchRequest {
                 query,
                 top_k: top_k_usize,
                 snippet_chars: 200,
-                uri: None,
-                scope: None,
+                uri,
+                scope,
                 cursor: None,
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                exclude_frame_ids,
+                exclude_uris,
             };
 
             let response = memvid.search(request).map_err(memvid_to_napi_error)?;
@@ -512,38 +533,96 @@ impl MemvidHandle {
     ///
     /// Returns the top_k most similar frames to the query embedding.
     /// Requires vec index to be enabled.
+    /// Supports filtering by exclude_frame_ids and exclude_uris.
     #[napi]
     pub fn vec_search(
         &self,
         query_embedding: Vec<f64>,
-        top_k: Option<i32>,
+        limit: Option<i32>,
+        uri: Option<String>,
+        scope: Option<String>,
+        exclude_ids: Option<Vec<i64>>,
+        exclude_uris_param: Option<Vec<String>>,
     ) -> napi::Result<SearchResult> {
         // Validate inputs before entering closure
         validate_embedding_size(&query_embedding)?;
-        let limit = i32_to_usize(top_k.unwrap_or(10))?;
+        let limit = i32_to_usize(limit.unwrap_or(10))?;
+        // Prepare exclude filters
+        let exclude_frame_ids: std::collections::HashSet<u64> = exclude_ids
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|id| if id >= 0 { Some(id as u64) } else { None })
+            .collect();
+        let exclude_uris: std::collections::HashSet<String> = exclude_uris_param
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let filter_uri = uri;
+        let filter_scope = scope;
+
         self.with_memvid(move |memvid| {
             // Convert f64 to f32
             let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
+            // Get more results than needed if filtering, to account for exclusions
+            let fetch_limit = if exclude_frame_ids.is_empty() && exclude_uris.is_empty()
+                && filter_uri.is_none() && filter_scope.is_none() {
+                limit
+            } else {
+                limit * 3 // Fetch extra to account for filtering
+            };
+
             let vec_hits = memvid
-                .search_vec(&query_f32, limit)
+                .search_vec(&query_f32, fetch_limit)
                 .map_err(memvid_to_napi_error)?;
 
-            let hits: napi::Result<Vec<SearchHit>> = vec_hits
-                .into_iter()
-                .map(|h| {
-                    Ok(SearchHit {
-                        frame_id: u64_to_i64(h.frame_id)?,
-                        score: Some(h.distance as f64),
-                        text: String::new(), // VecSearchHit doesn't include text
-                        range_start: 0,
-                        range_end: 0,
-                        title: None,
-                        uri: None,
-                    })
-                })
-                .collect();
-            let hits = hits?;
+            // Get frame info for filtering by URI
+            let mut hits: Vec<SearchHit> = Vec::new();
+            for h in vec_hits {
+                // Apply exclude_frame_ids filter
+                if exclude_frame_ids.contains(&h.frame_id) {
+                    continue;
+                }
+
+                // Get frame info for URI-based filtering
+                let frame = memvid.frame_by_id(h.frame_id).ok();
+                let frame_uri = frame.as_ref().and_then(|f| f.uri.clone())
+                    .unwrap_or_else(|| format!("mv2://{}", h.frame_id));
+                let frame_title = frame.as_ref().and_then(|f| f.title.clone());
+
+                // Apply exclude_uris filter
+                if exclude_uris.contains(&frame_uri) {
+                    continue;
+                }
+
+                // Apply uri filter (exact match)
+                if let Some(ref uri) = filter_uri {
+                    if &frame_uri != uri {
+                        continue;
+                    }
+                }
+
+                // Apply scope filter (prefix match)
+                if let Some(ref scope) = filter_scope {
+                    if !frame_uri.starts_with(scope) {
+                        continue;
+                    }
+                }
+
+                hits.push(SearchHit {
+                    frame_id: u64_to_i64(h.frame_id)?,
+                    score: Some(h.distance as f64),
+                    text: String::new(), // VecSearchHit doesn't include text
+                    range_start: 0,
+                    range_end: 0,
+                    title: frame_title,
+                    uri: Some(frame_uri),
+                });
+
+                if hits.len() >= limit {
+                    break;
+                }
+            }
 
             Ok(SearchResult {
                 total_hits: hits.len() as i64, // Vec length is always safe

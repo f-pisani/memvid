@@ -112,6 +112,7 @@ fn main() -> Result<()> {
             as_of_frame: None,
             as_of_ts: None,
             no_sketch: false,
+            ..Default::default()
         };
 
         let response = mem.search(request)?;

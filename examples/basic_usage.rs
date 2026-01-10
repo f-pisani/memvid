@@ -89,14 +89,7 @@ fn main() -> Result<()> {
         query: "memvid".to_string(),
         top_k: 10,
         snippet_chars: 200,
-        uri: None,
-        scope: None,
-        cursor: None,
-        #[cfg(feature = "temporal_track")]
-        temporal: None,
-        as_of_frame: None,
-        as_of_ts: None,
-        no_sketch: false,
+        ..Default::default()
     };
     let response = mem.search(request)?;
     println!("   Query: 'memvid'");
@@ -118,14 +111,8 @@ fn main() -> Result<()> {
         query: "documentation".to_string(),
         top_k: 10,
         snippet_chars: 100,
-        uri: None,
         scope: Some("mv2://docs/".to_string()),
-        cursor: None,
-        #[cfg(feature = "temporal_track")]
-        temporal: None,
-        as_of_frame: None,
-        as_of_ts: None,
-        no_sketch: false,
+        ..Default::default()
     };
     let response = mem.search(request)?;
     println!("   Query: 'documentation' (scope: mv2://docs/)");

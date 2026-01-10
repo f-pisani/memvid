@@ -51,6 +51,7 @@ fn doctor_rebuilds_tantivy_index() {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                ..Default::default()
             })
             .unwrap();
 
@@ -96,6 +97,7 @@ fn doctor_rebuilds_tantivy_index() {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                ..Default::default()
             })
             .unwrap();
 
@@ -234,6 +236,7 @@ fn open_file_with_tantivy_segments_enables_lex() {
             as_of_frame: None,
             as_of_ts: None,
             no_sketch: false,
+            ..Default::default()
         });
 
         assert!(
@@ -317,6 +320,7 @@ fn doctor_rebuild_produces_searchable_index() {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                ..Default::default()
             })
             .unwrap();
 
@@ -344,6 +348,7 @@ fn doctor_rebuild_produces_searchable_index() {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                ..Default::default()
             })
             .unwrap();
 

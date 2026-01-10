@@ -44,6 +44,7 @@ fn replay_save_does_not_corrupt_lex_index() {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                ..Default::default()
             })
             .unwrap();
         mem.end_session().unwrap();
@@ -69,6 +70,7 @@ fn replay_save_does_not_corrupt_lex_index() {
             as_of_frame: None,
             as_of_ts: None,
             no_sketch: false,
+            ..Default::default()
         })
         .unwrap();
 

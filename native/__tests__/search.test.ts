@@ -178,4 +178,70 @@ describe('Search Operations', () => {
       fs.unlinkSync(deleteTestFile);
     });
   });
+
+  describe('search filters', () => {
+    it('should exclude frame IDs from results', () => {
+      // Get the AI intro document's frame ID
+      const aiResults = mem.find('artificial intelligence', { topK: 1 });
+      expect(aiResults.hits.length).toBe(1);
+      const aiFrameId = aiResults.hits[0].frameId;
+
+      // Search again, excluding that frame ID
+      const filteredResults = mem.find('artificial intelligence', {
+        topK: 10,
+        excludeFrameIds: [aiFrameId],
+      });
+
+      // The excluded frame should not be in results
+      expect(filteredResults.hits.every((h) => h.frameId !== aiFrameId)).toBe(true);
+    });
+
+    it('should exclude URIs from results', () => {
+      // Search for 'the' which matches multiple docs
+      const allResults = mem.find('the', { topK: 10 });
+      const rustHit = allResults.hits.find((h) => h.uri === 'doc://rust/overview');
+
+      // If Rust doc is in results, exclude it
+      if (rustHit) {
+        const filteredResults = mem.find('the', {
+          topK: 10,
+          excludeUris: ['doc://rust/overview'],
+        });
+
+        // The excluded URI should not be in results
+        expect(filteredResults.hits.every((h) => h.uri !== 'doc://rust/overview')).toBe(true);
+      }
+    });
+
+    it('should filter by URI', () => {
+      // Search for a common word but filter to specific URI
+      const filteredResults = mem.find('the', {
+        topK: 10,
+        uri: 'doc://rust/overview',
+      });
+
+      // All results should have the specified URI
+      filteredResults.hits.forEach((h) => {
+        expect(h.uri).toBe('doc://rust/overview');
+      });
+    });
+
+    it('should filter by scope (URI prefix)', () => {
+      // Search with scope filter
+      const scopedResults = mem.find('the', {
+        topK: 10,
+        scope: 'doc://ai/',
+      });
+
+      // All results should have URIs starting with the scope
+      scopedResults.hits.forEach((h) => {
+        expect(h.uri?.startsWith('doc://ai/')).toBe(true);
+      });
+    });
+
+    it('should support options object with topK', () => {
+      const results = mem.find('TypeScript', { topK: 5 });
+      expect(results.hits.length).toBeLessThanOrEqual(5);
+    });
+  });
 });
