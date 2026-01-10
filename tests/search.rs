@@ -475,3 +475,138 @@ fn timeline_respects_limit() {
         "Timeline should return exactly limit entries"
     );
 }
+
+/// Test search with exclude_frame_ids filter.
+#[test]
+#[cfg(feature = "lex")]
+fn search_exclude_frame_ids() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    create_searchable_memory(&path);
+
+    let mut mem = Memvid::open_read_only(&path).unwrap();
+
+    // First search without exclusion to find frame IDs
+    let results = mem
+        .search(SearchRequest {
+            query: "mechanics".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(results.hits.len() >= 2, "Should find at least 2 mechanics docs");
+    let first_frame_id = results.hits[0].frame_id;
+
+    // Now exclude the first result
+    let filtered_results = mem
+        .search(SearchRequest {
+            query: "mechanics".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            exclude_frame_ids: vec![first_frame_id],
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Should have one fewer result and not contain the excluded frame
+    assert!(
+        filtered_results.hits.len() < results.hits.len(),
+        "Filtered results should have fewer hits"
+    );
+    assert!(
+        !filtered_results.hits.iter().any(|h| h.frame_id == first_frame_id),
+        "Excluded frame ID should not appear in results"
+    );
+}
+
+/// Test search with exclude_uris filter.
+#[test]
+#[cfg(feature = "lex")]
+fn search_exclude_uris() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    create_searchable_memory(&path);
+
+    let mut mem = Memvid::open_read_only(&path).unwrap();
+
+    // Search for physics docs
+    let results = mem
+        .search(SearchRequest {
+            query: "mechanics".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(results.hits.len() >= 2, "Should find mechanics docs");
+
+    // Exclude quantum physics by URI
+    let filtered_results = mem
+        .search(SearchRequest {
+            query: "mechanics".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            exclude_uris: vec!["mv2://physics/quantum".to_string()],
+            ..Default::default()
+        })
+        .unwrap();
+
+    // Should not contain the excluded URI
+    assert!(
+        !filtered_results.hits.iter().any(|h| h.uri == "mv2://physics/quantum"),
+        "Excluded URI should not appear in results"
+    );
+}
+
+/// Test search with both exclude_frame_ids and exclude_uris.
+#[test]
+#[cfg(feature = "lex")]
+fn search_exclude_combined() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("test.mv2");
+
+    create_searchable_memory(&path);
+
+    let mut mem = Memvid::open_read_only(&path).unwrap();
+
+    // Get all results first
+    let all_results = mem
+        .search(SearchRequest {
+            query: "the".to_string(), // Common word to get multiple results
+            top_k: 10,
+            snippet_chars: 200,
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(all_results.hits.len() >= 2, "Should find multiple docs");
+
+    let first_id = all_results.hits[0].frame_id;
+    let second_uri = all_results.hits[1].uri.clone();
+
+    // Exclude by both frame ID and URI
+    let filtered = mem
+        .search(SearchRequest {
+            query: "the".to_string(),
+            top_k: 10,
+            snippet_chars: 200,
+            exclude_frame_ids: vec![first_id],
+            exclude_uris: vec![second_uri.clone()],
+            ..Default::default()
+        })
+        .unwrap();
+
+    assert!(
+        !filtered.hits.iter().any(|h| h.frame_id == first_id),
+        "Excluded frame ID should not appear"
+    );
+    assert!(
+        !filtered.hits.iter().any(|h| h.uri == second_uri),
+        "Excluded URI should not appear"
+    );
+}
