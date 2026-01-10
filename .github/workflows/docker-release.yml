@@ -1,10 +1,17 @@
 name: Docker Release
 
+# Disabled for now - uncomment when Docker Hub secrets are configured
+# on:
+#   push:
+#     tags:
+#       - 'v*'
+#   workflow_dispatch:
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "publish" to confirm Docker release'
+        required: true
 
 env:
   REGISTRY: docker.io
