@@ -38,10 +38,26 @@ pub(super) fn search_with_lex_fallback(
     let snippet_window = request.snippet_chars.max(80);
     let max_snippets_per_doc = request.top_k.max(1);
 
+    // Build exclusion sets for O(1) lookup
+    let exclude_ids: std::collections::HashSet<u64> =
+        request.exclude_frame_ids.iter().copied().collect();
+    let exclude_uris_set: std::collections::HashSet<&str> =
+        request.exclude_uris.iter().map(|s| s.as_str()).collect();
+
     let mut evaluated = Vec::new();
     for matched in &matches {
+        // Apply candidate filter
         if let Some(filter) = candidate_filter {
             if !filter.contains(&matched.frame_id) {
+                continue;
+            }
+        }
+        // Apply exclusion filters at iteration time (equivalent to query-time for fallback)
+        if exclude_ids.contains(&matched.frame_id) {
+            continue;
+        }
+        if let Some(ref uri) = matched.uri {
+            if exclude_uris_set.contains(uri.as_str()) {
                 continue;
             }
         }
@@ -204,6 +220,12 @@ pub(super) fn search_with_filters_only(
     start_time: Instant,
     candidate_filter: Option<&HashSet<FrameId>>,
 ) -> Result<SearchResponse> {
+    // Build exclusion sets for O(1) lookup
+    let exclude_ids: std::collections::HashSet<u64> =
+        request.exclude_frame_ids.iter().copied().collect();
+    let exclude_uris_set: std::collections::HashSet<&str> =
+        request.exclude_uris.iter().map(|s| s.as_str()).collect();
+
     let mut matches = Vec::new();
     let snippet_limit = request.snippet_chars.max(80);
     let frames: Vec<Frame> = if let Some(filter) = candidate_filter {
@@ -219,6 +241,16 @@ pub(super) fn search_with_filters_only(
     };
 
     for frame in frames {
+        // Apply exclusion filters early
+        if exclude_ids.contains(&frame.id) {
+            continue;
+        }
+        if let Some(ref uri) = frame.uri {
+            if exclude_uris_set.contains(uri.as_str()) {
+                continue;
+            }
+        }
+
         let search_text = memvid.frame_search_text(&frame)?;
         let content_lower = search_text.to_ascii_lowercase();
         let ctx = EvaluationContext {

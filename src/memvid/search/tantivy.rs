@@ -65,11 +65,25 @@ pub(super) fn try_tantivy_search(
         candidate_filter.map(|set| set.iter().copied().collect());
     let frame_filter_slice = frame_filter_vec.as_deref();
 
+    // Convert exclusion filters for Tantivy query
+    let exclude_ids: Option<Vec<u64>> = if request.exclude_frame_ids.is_empty() {
+        None
+    } else {
+        Some(request.exclude_frame_ids.clone())
+    };
+    let exclude_uris: Option<&[String]> = if request.exclude_uris.is_empty() {
+        None
+    } else {
+        Some(&request.exclude_uris)
+    };
+
     let search_hits = match engine.search_documents(
         parsed,
         uri_filter,
         scope_filter,
         frame_filter_slice,
+        exclude_ids.as_deref(),
+        exclude_uris,
         doc_limit,
     ) {
         Ok(hits) => hits,

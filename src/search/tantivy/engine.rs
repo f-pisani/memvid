@@ -341,6 +341,8 @@ impl TantivyEngine {
         uri_filter: Option<&str>,
         scope_filter: Option<&str>,
         frame_filter: Option<&[u64]>,
+        exclude_frame_ids: Option<&[u64]>,
+        exclude_uris: Option<&[String]>,
         limit: usize,
     ) -> Result<Vec<TantivyDocHit>> {
         if let Some(ids) = frame_filter {
@@ -349,7 +351,15 @@ impl TantivyEngine {
             }
         }
 
-        let query = query::build_root_query(self, parsed, uri_filter, scope_filter, frame_filter)?;
+        let query = query::build_root_query(
+            self,
+            parsed,
+            uri_filter,
+            scope_filter,
+            frame_filter,
+            exclude_frame_ids,
+            exclude_uris,
+        )?;
         let doc_limit = limit.max(1);
         let searcher = self.reader.searcher();
         let top_docs = searcher

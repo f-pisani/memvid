@@ -9,7 +9,7 @@ use crate::types::{
     FrameId, SearchHitTemporal, SearchHitTemporalAnchor, SearchHitTemporalMention, TemporalMention,
 };
 use crate::types::{
-    SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchRequest, SearchResponse,
+    SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse,
 };
 #[cfg(feature = "temporal_track")]
 use std::collections::HashMap;
@@ -420,37 +420,3 @@ pub(super) fn enrich_hits_with_entities(hits: &mut [SearchHit], memvid: &Memvid)
     }
 }
 
-/// Apply exclude filters to search hits.
-///
-/// Removes hits that match any of the exclusion criteria:
-/// - Frame IDs in `exclude_frame_ids`
-/// - URIs in `exclude_uris`
-///
-/// Re-ranks remaining hits after filtering.
-pub(crate) fn apply_exclude_filters(hits: &mut Vec<SearchHit>, request: &SearchRequest) {
-    if request.exclude_frame_ids.is_empty() && request.exclude_uris.is_empty() {
-        return;
-    }
-
-    let exclude_ids: StdHashSet<u64> = request.exclude_frame_ids.iter().copied().collect();
-    let exclude_uris: StdHashSet<&str> = request.exclude_uris.iter().map(|s| s.as_str()).collect();
-
-    hits.retain(|hit| {
-        // Check frame ID exclusion
-        if exclude_ids.contains(&hit.frame_id) {
-            return false;
-        }
-
-        // Check URI exclusion
-        if exclude_uris.contains(hit.uri.as_str()) {
-            return false;
-        }
-
-        true
-    });
-
-    // Re-rank remaining hits
-    for (idx, hit) in hits.iter_mut().enumerate() {
-        hit.rank = idx + 1;
-    }
-}

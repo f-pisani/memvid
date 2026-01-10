@@ -31,7 +31,7 @@ pub use api::{
 
 #[cfg(feature = "lex")]
 use fallback::{search_with_filters_only, search_with_lex_fallback};
-use helpers::{apply_exclude_filters, empty_search_response};
+use helpers::empty_search_response;
 #[cfg(feature = "lex")]
 pub use tantivy::parse_content_date_to_timestamp;
 #[cfg(feature = "lex")]
@@ -261,9 +261,8 @@ impl Memvid {
             helpers::enrich_hits_with_entities(&mut response.hits, self);
         }
 
-        // Apply exclude filters (exclude_frame_ids, exclude_uris)
-        apply_exclude_filters(&mut response.hits, &request);
-        response.total_hits = response.hits.len();
+        // Note: exclude_frame_ids and exclude_uris are now applied at query time
+        // in Tantivy (via MustNot clauses) and in fallback search (via early filtering)
 
         // Record the search action if a replay session is active
         #[cfg(feature = "replay")]

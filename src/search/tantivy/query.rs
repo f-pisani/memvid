@@ -17,8 +17,17 @@ pub(super) fn build_root_query(
     uri_filter: Option<&str>,
     scope_filter: Option<&str>,
     frame_filter: Option<&[u64]>,
+    exclude_frame_ids: Option<&[u64]>,
+    exclude_uris: Option<&[String]>,
 ) -> Result<Box<dyn Query>> {
-    QueryPlanner { engine }.build_root_query(parsed, uri_filter, scope_filter, frame_filter)
+    QueryPlanner { engine }.build_root_query(
+        parsed,
+        uri_filter,
+        scope_filter,
+        frame_filter,
+        exclude_frame_ids,
+        exclude_uris,
+    )
 }
 
 struct QueryPlanner<'a> {
@@ -32,6 +41,8 @@ impl<'a> QueryPlanner<'a> {
         uri_filter: Option<&str>,
         scope_filter: Option<&str>,
         frame_filter: Option<&[u64]>,
+        exclude_frame_ids: Option<&[u64]>,
+        exclude_uris: Option<&[String]>,
     ) -> Result<Box<dyn Query>> {
         let mut clauses: Vec<(Occur, Box<dyn Query>)> = Vec::new();
         clauses.push((Occur::Must, self.build_expr_query(&parsed.expr)?));
@@ -54,6 +65,29 @@ impl<'a> QueryPlanner<'a> {
                     .map(|id| Term::from_field_u64(self.engine.frame_id, *id))
                     .collect();
                 clauses.push((Occur::Must, Box::new(TermSetQuery::new(terms))));
+            }
+        }
+
+        // Exclude specific frame IDs at query time (MustNot)
+        if let Some(ids) = exclude_frame_ids {
+            if !ids.is_empty() {
+                let terms: Vec<Term> = ids
+                    .iter()
+                    .map(|id| Term::from_field_u64(self.engine.frame_id, *id))
+                    .collect();
+                clauses.push((Occur::MustNot, Box::new(TermSetQuery::new(terms))));
+            }
+        }
+
+        // Exclude specific URIs at query time (MustNot)
+        if let Some(uris) = exclude_uris {
+            for uri in uris {
+                let normalized = to_search_value(uri);
+                let term = Term::from_field_text(self.engine.uri, &normalized);
+                clauses.push((
+                    Occur::MustNot,
+                    Box::new(TermQuery::new(term, IndexRecordOption::Basic)),
+                ));
             }
         }
 
