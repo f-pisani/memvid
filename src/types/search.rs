@@ -36,7 +36,7 @@ impl Default for SearchEngineKind {
 }
 
 /// Search request accepted by the core; supports lexical, hybrid, and temporal filters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SearchRequest {
     /// Query string (lexical or semantic depending on engine).
     pub query: String,
@@ -65,6 +65,12 @@ pub struct SearchRequest {
     #[serde(default)]
     /// Disable sketch pre-filtering for this query.
     pub no_sketch: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Exclude specific frame IDs from results.
+    pub exclude_frame_ids: Vec<FrameId>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Exclude frames matching these URIs from results.
+    pub exclude_uris: Vec<String>,
 }
 
 /// A single ranked hit with snippet metadata.

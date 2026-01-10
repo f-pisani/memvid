@@ -84,6 +84,20 @@ export interface SearchResult {
   cursor?: string;
 }
 
+/** Options for search filtering */
+export interface SearchOptions {
+  /** Maximum number of results to return (default: 10) */
+  topK?: number;
+  /** Restrict search to a specific URI */
+  uri?: string;
+  /** Restrict search to a scope (URI prefix) */
+  scope?: string;
+  /** Exclude specific frame IDs from results */
+  excludeFrameIds?: number[];
+  /** Exclude frames matching these URIs from results */
+  excludeUris?: string[];
+}
+
 /** Statistics about a memvid file */
 export interface Stats {
   /** Total number of frames */

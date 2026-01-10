@@ -38,6 +38,7 @@ import type {
   TimelineEntry,
   FrameInfo,
   SearchResult,
+  SearchOptions,
   Stats,
   EmbeddingProvider,
   PutManyResult,
@@ -367,24 +368,49 @@ export class Memvid {
    * Search for documents using text search
    *
    * @param query - Search query string
-   * @param topK - Maximum number of results (default: 10)
+   * @param options - Search options (topK, uri, scope, excludeFrameIds, excludeUris)
    * @returns Search results with hits and metadata
    *
    * @example
    * ```typescript
+   * // Basic search
    * const results = mem.find('artificial intelligence');
-   * for (const hit of results.hits) {
-   *   console.log(hit.text, hit.score);
-   * }
+   *
+   * // With options
+   * const filtered = mem.find('AI', {
+   *   topK: 5,
+   *   scope: 'doc://articles/',
+   *   excludeFrameIds: [0, 1],
+   * });
    * ```
    */
-  find(query: string, topK?: number): SearchResult {
+  find(query: string, options?: SearchOptions | number): SearchResult {
     if (typeof query !== 'string') {
       throw new MemvidError('INVALID_INPUT', 'query must be a string');
     }
-    const validTopK = validatePositiveInt(topK, 'topK');
+
+    // Support both old signature (query, topK) and new signature (query, options)
+    let limit: number | undefined;
+    let uri: string | undefined;
+    let scope: string | undefined;
+    let excludeIds: number[] | undefined;
+    let excludeUris: string[] | undefined;
+
+    if (typeof options === 'number') {
+      // Old signature: find(query, topK)
+      limit = options;
+    } else if (options) {
+      // New signature: find(query, options)
+      limit = options.topK;
+      uri = options.uri;
+      scope = options.scope;
+      excludeIds = options.excludeFrameIds;
+      excludeUris = options.excludeUris;
+    }
+
     try {
-      return this.handle.find(query, validTopK) as SearchResult;
+      // Call native function with individual parameters
+      return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -394,31 +420,49 @@ export class Memvid {
    * Search for documents using vector similarity
    *
    * @param queryEmbedding - Query embedding vector
-   * @param topK - Maximum number of results (default: 10)
-   * @param maxDistance - Optional max distance threshold (lower = more similar)
+   * @param options - Search options (topK, uri, scope, excludeFrameIds, excludeUris)
    * @returns Search results ranked by similarity
    *
    * @example
    * ```typescript
    * const embedder = new OpenAIEmbeddings({ apiKey: '...' });
    * const queryEmbedding = await embedder.embedQuery('What is AI?');
-   * // Get top 5, but only if distance < 1.2
-   * const results = mem.vecSearch(queryEmbedding, 5, 1.2);
+   *
+   * // Basic search
+   * const results = mem.vecSearch(queryEmbedding, { topK: 5 });
+   *
+   * // Exclude specific frames
+   * const filtered = mem.vecSearch(queryEmbedding, {
+   *   topK: 10,
+   *   excludeFrameIds: [0, 1, 2],
+   * });
    * ```
    */
-  vecSearch(queryEmbedding: number[], topK?: number, maxDistance?: number): SearchResult {
+  vecSearch(queryEmbedding: number[], options?: SearchOptions | number): SearchResult {
     const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
-    const validTopK = validatePositiveInt(topK, 'topK');
+
+    // Support both old signature (embedding, topK) and new signature (embedding, options)
+    let limit: number | undefined;
+    let uri: string | undefined;
+    let scope: string | undefined;
+    let excludeIds: number[] | undefined;
+    let excludeUris: string[] | undefined;
+
+    if (typeof options === 'number') {
+      // Old signature: vecSearch(embedding, topK)
+      limit = options;
+    } else if (options) {
+      // New signature: vecSearch(embedding, options)
+      limit = options.topK;
+      uri = options.uri;
+      scope = options.scope;
+      excludeIds = options.excludeFrameIds;
+      excludeUris = options.excludeUris;
+    }
+
     try {
-      const result = this.handle.vecSearch(validEmbedding, validTopK) as SearchResult;
-
-      // Filter by distance threshold if provided
-      if (maxDistance !== undefined) {
-        result.hits = result.hits.filter(h => h.score !== undefined && h.score <= maxDistance);
-        result.totalHits = result.hits.length;
-      }
-
-      return result;
+      // Call native function with individual parameters
+      return this.handle.vecSearch(validEmbedding, limit, uri, scope, excludeIds, excludeUris) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }

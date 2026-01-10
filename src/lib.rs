@@ -606,6 +606,8 @@ mod tests {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                exclude_frame_ids: Vec::new(),
+                exclude_uris: Vec::new(),
             };
             let response = mem.search(request).expect("search");
             assert_eq!(response.hits.len(), 1);
@@ -625,6 +627,8 @@ mod tests {
                 as_of_frame: None,
                 as_of_ts: None,
                 no_sketch: false,
+                exclude_frame_ids: Vec::new(),
+                exclude_uris: Vec::new(),
             };
             let response = reopened.search(request).expect("search reopened");
             assert_eq!(response.hits.len(), 1);
@@ -696,6 +700,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("search");
 
@@ -757,6 +763,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("search");
 
@@ -841,6 +849,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("uri search");
             assert_eq!(uri_response.engine, SearchEngineKind::Tantivy);
@@ -864,6 +874,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("scope search");
             assert_eq!(scope_response.engine, SearchEngineKind::Tantivy);
@@ -917,6 +929,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("page one");
             assert_eq!(first_page.engine, SearchEngineKind::Tantivy);
@@ -940,6 +954,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("page two");
             assert_eq!(second_page.engine, SearchEngineKind::Tantivy);
@@ -981,6 +997,8 @@ mod tests {
                     as_of_frame: None,
                     as_of_ts: None,
                     no_sketch: false,
+                    exclude_frame_ids: Vec::new(),
+                    exclude_uris: Vec::new(),
                 })
                 .expect("search with tantivy");
 
