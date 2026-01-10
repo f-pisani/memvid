@@ -160,7 +160,8 @@ export class Memvid {
    * Check if handle is closed
    */
   get isClosed(): boolean {
-    return this.handle.isClosed();
+    // Native binding exposes this as a method, not a getter
+    return (this.handle as any).isClosed();
   }
 
   /**

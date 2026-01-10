@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { Memvid } from '../index.js';
+import { Memvid } from '../dist/index.js';
 
 const testFile = path.join(os.tmpdir(), `memvid_search_${crypto.randomUUID()}.mv2`);
 

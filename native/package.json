@@ -2,12 +2,12 @@
   "name": "@fpisani/memvid",
   "version": "1.0.0",
   "description": "Node.js bindings for memvid-core - unlimited local AI memory",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "require": "./index.js",
-      "types": "./index.d.ts"
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     }
   },
   "license": "Apache-2.0",
@@ -15,8 +15,12 @@
     "node": ">= 18"
   },
   "scripts": {
-    "build": "napi build --platform --release",
-    "build:debug": "napi build --platform",
+    "build": "npm run build:native && npm run build:ts",
+    "build:native": "napi build --platform --release",
+    "build:debug": "npm run build:native:debug && npm run build:ts",
+    "build:native:debug": "napi build --platform",
+    "build:ts": "tsc",
+    "clean": "rm -rf dist *.node",
     "test": "vitest run",
     "test:watch": "vitest",
     "artifacts": "napi artifacts",
@@ -43,7 +47,9 @@
   },
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "dist/**/*",
+    "*.node"
   ],
   "keywords": [
     "memvid",
