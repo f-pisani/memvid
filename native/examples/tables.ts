@@ -22,8 +22,10 @@
  * PDF table extraction requires valid PDF files with tables.
  */
 
-import { create, open } from '@fpisani/memvid';
+import { create, open } from '../dist/index.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Helper to access native handle
 function getHandle(mem: any): any {
@@ -31,7 +33,7 @@ function getHandle(mem: any): any {
 }
 
 async function main() {
-  const filePath = './tables-example.mv2';
+  const filePath = path.join(os.tmpdir(), 'tables-example.mv2');
 
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -73,32 +75,31 @@ async function main() {
   console.log('\n--- Table Extraction API ---\n');
 
   console.log('Table extraction requires valid PDF bytes:');
-  console.log(`
-  // Example with real PDF:
-  const pdfBytes = fs.readFileSync('report.pdf');
-  const tables = handle.extractTables(pdfBytes, 'report.pdf', {
-    mode: 'conservative',
-    minRows: 3,
-    minCols: 2,
-    mergeMultiPage: true,
-    maxPages: 10,
-  });
-
-  for (const table of tables) {
-    console.log(\`Table ID: \${table.tableId}\`);
-    console.log(\`Page: \${table.page}\`);
-    console.log(\`Dimensions: \${table.nRows}x\${table.nCols}\`);
-    console.log(\`Quality: \${table.quality}\`);
-    console.log(\`Headers: \${table.headers.join(', ')}\`);
-  }
-  `);
+  console.log('');
+  console.log('  // Example with real PDF:');
+  console.log("  const pdfBytes = fs.readFileSync('report.pdf');");
+  console.log("  const tables = handle.extractTables(pdfBytes, 'report.pdf', {");
+  console.log("    mode: 'conservative',");
+  console.log('    minRows: 3,');
+  console.log('    minCols: 2,');
+  console.log('    mergeMultiPage: true,');
+  console.log('    maxPages: 10,');
+  console.log('  });');
+  console.log('');
+  console.log('  for (const table of tables) {');
+  console.log('    console.log("Table ID:", table.tableId);');
+  console.log('    console.log("Page:", table.page);');
+  console.log('    console.log("Dimensions:", table.nRows + "x" + table.nCols);');
+  console.log('    console.log("Quality:", table.quality);');
+  console.log('    console.log("Headers:", table.headers.join(", "));');
+  console.log('  }');
 
   // Try with an empty buffer to show error handling
   console.log('\nDemonstrating error handling with invalid PDF:');
   try {
     handle.extractTables(Buffer.from([]), 'empty.pdf', { mode: 'conservative' });
   } catch (error) {
-    console.log(`  Expected error: ${(error as Error).message.slice(0, 60)}...`);
+    console.log('  Expected error: ' + (error as Error).message.slice(0, 60) + '...');
   }
 
   // -------------------------------------------------------------------------
@@ -109,16 +110,16 @@ async function main() {
   console.log('\n--- Listing Stored Tables ---\n');
 
   const storedTables = handle.listTables();
-  console.log(`Found ${storedTables.length} stored tables`);
+  console.log('Found ' + storedTables.length + ' stored tables');
 
   if (storedTables.length > 0) {
     console.log('\nStored tables:');
     for (const summary of storedTables) {
-      console.log(`  Table ID: ${summary.tableId}`);
-      console.log(`    Title: ${summary.title}`);
-      console.log(`    Dimensions: ${summary.nRows}x${summary.nCols}`);
-      console.log(`    Headers: ${summary.headers.join(', ')}`);
-      console.log(`    Frame ID: ${summary.frameId}`);
+      console.log('  Table ID: ' + summary.tableId);
+      console.log('    Title: ' + summary.title);
+      console.log('    Dimensions: ' + summary.nRows + 'x' + summary.nCols);
+      console.log('    Headers: ' + summary.headers.join(', '));
+      console.log('    Frame ID: ' + summary.frameId);
     }
   }
 
@@ -130,22 +131,21 @@ async function main() {
   console.log('\n--- Get Table by ID ---\n');
 
   console.log('Example usage:');
-  console.log(`
-  const table = handle.getTable('table_001');
-  if (table) {
-    console.log('Headers:', table.headers);
-    console.log('Rows:', table.rows.length);
-
-    // Access row data
-    for (const row of table.rows.slice(0, 5)) {
-      console.log(row.join(' | '));
-    }
-  }
-  `);
+  console.log('');
+  console.log("  const table = handle.getTable('table_001');");
+  console.log('  if (table) {');
+  console.log("    console.log('Headers:', table.headers);");
+  console.log("    console.log('Rows:', table.rows.length);");
+  console.log('');
+  console.log('    // Access row data');
+  console.log('    for (const row of table.rows.slice(0, 5)) {');
+  console.log("      console.log(row.join(' | '));");
+  console.log('    }');
+  console.log('  }');
 
   // Try to get a non-existent table
   const nonExistentTable = handle.getTable('non-existent-table');
-  console.log(`Get non-existent table: ${nonExistentTable}`); // null
+  console.log('\nGet non-existent table: ' + nonExistentTable); // null
 
   // -------------------------------------------------------------------------
   // Step 5: Export Tables
@@ -155,31 +155,29 @@ async function main() {
   console.log('\n--- Table Export Formats ---\n');
 
   console.log('CSV Export:');
-  console.log(`
-  const csv = handle.exportTableCsv('table_001');
-  fs.writeFileSync('output.csv', csv);
-
-  // CSV format:
-  // "Name","Age","Department"
-  // "Alice","30","Engineering"
-  // "Bob","25","Marketing"
-  `);
+  console.log('');
+  console.log("  const csv = handle.exportTableCsv('table_001');");
+  console.log("  fs.writeFileSync('output.csv', csv);");
+  console.log('');
+  console.log('  // CSV format:');
+  console.log('  // "Name","Age","Department"');
+  console.log('  // "Alice","30","Engineering"');
+  console.log('  // "Bob","25","Marketing"');
 
   console.log('\nJSON Export:');
-  console.log(`
-  const json = handle.exportTableJson('table_001');
-  const data = JSON.parse(json);
-
-  // JSON format:
-  // {
-  //   "tableId": "table_001",
-  //   "headers": ["Name", "Age", "Department"],
-  //   "rows": [
-  //     {"Name": "Alice", "Age": "30", "Department": "Engineering"},
-  //     {"Name": "Bob", "Age": "25", "Department": "Marketing"}
-  //   ]
-  // }
-  `);
+  console.log('');
+  console.log("  const json = handle.exportTableJson('table_001');");
+  console.log('  const data = JSON.parse(json);');
+  console.log('');
+  console.log('  // JSON format:');
+  console.log('  // {');
+  console.log('  //   "tableId": "table_001",');
+  console.log('  //   "headers": ["Name", "Age", "Department"],');
+  console.log('  //   "rows": [');
+  console.log('  //     {"Name": "Alice", "Age": "30", "Department": "Engineering"},');
+  console.log('  //     {"Name": "Bob", "Age": "25", "Department": "Marketing"}');
+  console.log('  //   ]');
+  console.log('  // }');
 
   // -------------------------------------------------------------------------
   // Step 6: Simulated Table Workflow
@@ -231,8 +229,8 @@ async function main() {
   console.log('\nSearching for "Engineering":');
   const searchResults = mem.find('Engineering', 5);
   for (const hit of searchResults.hits) {
-    console.log(`  [${hit.frameId}] ${hit.title}`);
-    console.log(`       ${hit.text.slice(0, 80)}...`);
+    console.log('  [' + hit.frameId + '] ' + hit.title);
+    console.log('       ' + hit.text.slice(0, 80) + '...');
   }
 
   // -------------------------------------------------------------------------
@@ -247,11 +245,25 @@ async function main() {
 
   if (jsonFrame) {
     const tableJson = mem.view(jsonFrame.frameId);
-    const table = JSON.parse(tableJson);
+    
+    // Try to parse the JSON with error handling
+    let table;
+    try {
+      table = JSON.parse(tableJson);
+    } catch (parseError) {
+      console.log('Warning: Could not parse table JSON directly.');
+      console.log('  Error: ' + (parseError as Error).message);
+      console.log('  Content length: ' + tableJson.length + ' characters');
+      console.log('  Content preview: ' + tableJson.slice(0, 100) + '...');
+      
+      // Try to use the original employeeData as fallback
+      console.log('\nUsing in-memory table data as fallback...');
+      table = employeeData;
+    }
 
-    console.log(`Table: Employee Directory`);
-    console.log(`Columns: ${table.headers.length}`);
-    console.log(`Rows: ${table.rows.length}`);
+    console.log('Table: Employee Directory');
+    console.log('Columns: ' + table.headers.length);
+    console.log('Rows: ' + table.rows.length);
 
     // Calculate statistics
     const salaries = table.rows
@@ -263,15 +275,15 @@ async function main() {
     const minSalary = Math.min(...salaries);
 
     console.log('\nSalary Statistics:');
-    console.log(`  Average: $${avgSalary.toLocaleString()}`);
-    console.log(`  Max: $${maxSalary.toLocaleString()}`);
-    console.log(`  Min: $${minSalary.toLocaleString()}`);
+    console.log('  Average: $' + avgSalary.toLocaleString());
+    console.log('  Max: $' + maxSalary.toLocaleString());
+    console.log('  Min: $' + minSalary.toLocaleString());
 
     // Filter rows
     const engineers = table.rows.filter((row: string[]) => row[2] === 'Engineering');
-    console.log(`\nEngineering employees: ${engineers.length}`);
+    console.log('\nEngineering employees: ' + engineers.length);
     for (const eng of engineers) {
-      console.log(`  - ${eng[1]} (${eng[3]})`);
+      console.log('  - ' + eng[1] + ' (' + eng[3] + ')');
     }
   }
 
@@ -296,8 +308,8 @@ async function main() {
   console.log('\n--- Final Statistics ---\n');
 
   const stats = mem.stats();
-  console.log(`Total frames: ${stats.frameCount}`);
-  console.log(`File size: ${stats.sizeBytes} bytes`);
+  console.log('Total frames: ' + stats.frameCount);
+  console.log('File size: ' + stats.sizeBytes + ' bytes');
 
   // Cleanup
   mem.close();

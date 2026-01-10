@@ -19,8 +19,10 @@
  * - Optional automatic repairs
  */
 
-import { create, open, doctor, version } from '@fpisani/memvid';
+import { create, open, doctor, version } from '../dist/index.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Helper to access native handle
 function getHandle(mem: any): any {
@@ -28,14 +30,14 @@ function getHandle(mem: any): any {
 }
 
 async function main() {
-  const filePath = './maintenance-example.mv2';
+  const filePath = path.join(os.tmpdir(), 'maintenance-example.mv2');
 
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
   }
 
   console.log('=== File Maintenance Example ===\n');
-  console.log(`Memvid version: ${version()}\n`);
+  console.log('Memvid version: ' + version() + '\n');
 
   // -------------------------------------------------------------------------
   // Step 1: Create a file with test data
@@ -43,7 +45,6 @@ async function main() {
   console.log('--- Creating Test File ---\n');
 
   let mem = create(filePath);
-  const handle = getHandle(mem);
   mem.enableLex();
 
   // Add various documents
@@ -63,13 +64,13 @@ async function main() {
       labels: ['test', 'maintenance-demo'],
     });
     frameIds.push(frameId);
-    console.log(`Created frame ${frameId}: ${doc.title}`);
+    console.log('Created frame ' + frameId + ': ' + doc.title);
   }
 
   mem.commit();
   mem.close();
 
-  console.log(`\nCreated ${documents.length} frames in ${filePath}`);
+  console.log('\nCreated ' + documents.length + ' frames in ' + filePath);
 
   // -------------------------------------------------------------------------
   // Step 2: Basic verification
@@ -80,11 +81,11 @@ async function main() {
 
   // Quick verification (header only)
   const quickValid = mem.verify(false);
-  console.log(`Quick verify (header): ${quickValid ? 'PASS' : 'FAIL'}`);
+  console.log('Quick verify (header): ' + (quickValid ? 'PASS' : 'FAIL'));
 
   // Deep verification (checksums all frames)
   const deepValid = mem.verify(true);
-  console.log(`Deep verify (all frames): ${deepValid ? 'PASS' : 'FAIL'}`);
+  console.log('Deep verify (all frames): ' + (deepValid ? 'PASS' : 'FAIL'));
 
   mem.close();
 
@@ -98,13 +99,13 @@ async function main() {
   const diagnosisResult = doctor(filePath, false);
 
   console.log('Doctor diagnosis results:');
-  console.log(`  Issues found: ${diagnosisResult.issuesFound}`);
-  console.log(`  Issues fixed: ${diagnosisResult.issuesFixed}`);
+  console.log('  Issues found: ' + diagnosisResult.issuesFound);
+  console.log('  Issues fixed: ' + diagnosisResult.issuesFixed);
 
   if (diagnosisResult.actions.length > 0) {
-    console.log(`  Actions (${diagnosisResult.actions.length}):`);
+    console.log('  Actions (' + diagnosisResult.actions.length + '):');
     for (const action of diagnosisResult.actions) {
-      console.log(`    - ${action}`);
+      console.log('    - ' + action);
     }
   } else {
     console.log('  No issues detected - file is healthy');
@@ -120,13 +121,13 @@ async function main() {
   const repairResult = doctor(filePath, true);
 
   console.log('Doctor repair results:');
-  console.log(`  Issues found: ${repairResult.issuesFound}`);
-  console.log(`  Issues fixed: ${repairResult.issuesFixed}`);
+  console.log('  Issues found: ' + repairResult.issuesFound);
+  console.log('  Issues fixed: ' + repairResult.issuesFixed);
 
   if (repairResult.actions.length > 0) {
-    console.log(`  Actions taken:`);
+    console.log('  Actions taken:');
     for (const action of repairResult.actions) {
-      console.log(`    - ${action}`);
+      console.log('    - ' + action);
     }
   }
 
@@ -135,26 +136,27 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log('\n--- File Statistics ---\n');
 
+  // Re-open after doctor() which may have modified the file
   mem = open(filePath);
   const stats = mem.stats();
 
   console.log('File health metrics:');
-  console.log(`  Total frames: ${stats.frameCount}`);
-  console.log(`  Active frames: ${stats.activeFrameCount}`);
-  console.log(`  Deleted frames: ${stats.frameCount - stats.activeFrameCount}`);
-  console.log(`  File size: ${stats.sizeBytes} bytes`);
-  console.log(`  Payload bytes: ${stats.payloadBytes}`);
-  console.log(`  Logical bytes: ${stats.logicalBytes}`);
-  console.log(`  Saved by compression: ${stats.savedBytes} bytes (${stats.savingsPercent.toFixed(1)}%)`);
-  console.log(`  Compression ratio: ${stats.compressionRatioPercent.toFixed(1)}%`);
-  console.log(`  Avg frame size: ${stats.averageFramePayloadBytes} bytes`);
+  console.log('  Total frames: ' + stats.frameCount);
+  console.log('  Active frames: ' + stats.activeFrameCount);
+  console.log('  Deleted frames: ' + (stats.frameCount - stats.activeFrameCount));
+  console.log('  File size: ' + stats.sizeBytes + ' bytes');
+  console.log('  Payload bytes: ' + stats.payloadBytes);
+  console.log('  Logical bytes: ' + stats.logicalBytes);
+  console.log('  Saved by compression: ' + stats.savedBytes + ' bytes (' + stats.savingsPercent.toFixed(1) + '%)');
+  console.log('  Compression ratio: ' + stats.compressionRatioPercent.toFixed(1) + '%');
+  console.log('  Avg frame size: ' + stats.averageFramePayloadBytes + ' bytes');
 
   console.log('\nIndex status:');
-  console.log(`  Lex (text) index: ${stats.hasLexIndex ? 'enabled' : 'disabled'}`);
-  console.log(`  Vec (vector) index: ${stats.hasVecIndex ? 'enabled' : 'disabled'}`);
-  console.log(`  CLIP index: ${stats.hasClipIndex ? 'enabled' : 'disabled'}`);
-  console.log(`  Time index: ${stats.hasTimeIndex ? 'enabled' : 'disabled'}`);
-  console.log(`  Vector count: ${stats.vectorCount}`);
+  console.log('  Lex (text) index: ' + (stats.hasLexIndex ? 'enabled' : 'disabled'));
+  console.log('  Vec (vector) index: ' + (stats.hasVecIndex ? 'enabled' : 'disabled'));
+  console.log('  CLIP index: ' + (stats.hasClipIndex ? 'enabled' : 'disabled'));
+  console.log('  Time index: ' + (stats.hasTimeIndex ? 'enabled' : 'disabled'));
+  console.log('  Vector count: ' + stats.vectorCount);
 
   // -------------------------------------------------------------------------
   // Step 6: Updating frame metadata
@@ -165,23 +167,25 @@ async function main() {
   const timeline = mem.timeline({ limit: 1 });
   const frameToUpdate = timeline[0];
 
-  console.log(`Before update (frame ${frameToUpdate.frameId}):`);
+  console.log('Before update (frame ' + frameToUpdate.frameId + '):');
   const beforeInfo = mem.frame(frameToUpdate.frameId);
-  console.log(`  Title: ${beforeInfo.title}`);
-  console.log(`  Kind: ${beforeInfo.kind}`);
+  console.log('  Title: ' + beforeInfo.title);
+  console.log('  Kind: ' + beforeInfo.kind);
 
-  // Update the frame's metadata
-  handle.update(frameToUpdate.frameId, {
-    title: 'Updated Title - TypeScript Introduction',
-    kind: 'updated-article',
-    labels: ['test', 'updated', 'v2'],
-  });
-
-  mem.commit();
-
-  // Note: The update modifies internal metadata but frame() may show
-  // original values depending on implementation
-  console.log('\nMetadata update operation completed');
+  // Update the frame's metadata - use getHandle on the current mem instance
+  const handle = getHandle(mem);
+  try {
+    handle.update(frameToUpdate.frameId, {
+      title: 'Updated Title - TypeScript Introduction',
+      kind: 'updated-article',
+      labels: ['test', 'updated', 'v2'],
+    });
+    mem.commit();
+    console.log('\nMetadata update operation completed');
+  } catch (error) {
+    console.log('\nMetadata update error: ' + (error as Error).message);
+    console.log('  Note: Some operations may not be supported after doctor() repair');
+  }
 
   // -------------------------------------------------------------------------
   // Step 7: Soft-deleting frames
@@ -190,34 +194,42 @@ async function main() {
 
   console.log('Before deletion:');
   const statsBefore = mem.stats();
-  console.log(`  Total frames: ${statsBefore.frameCount}`);
-  console.log(`  Active frames: ${statsBefore.activeFrameCount}`);
+  console.log('  Total frames: ' + statsBefore.frameCount);
+  console.log('  Active frames: ' + statsBefore.activeFrameCount);
 
   // Soft delete a frame (marks as deleted but keeps data)
   const frameToDelete = frameIds[frameIds.length - 1]; // Last frame
-  console.log(`\nDeleting frame ${frameToDelete}...`);
-  mem.delete(frameToDelete);
-  mem.commit();
+  console.log('\nDeleting frame ' + frameToDelete + '...');
+  try {
+    mem.delete(frameToDelete);
+    mem.commit();
 
-  console.log('\nAfter deletion:');
-  const statsAfter = mem.stats();
-  console.log(`  Total frames: ${statsAfter.frameCount}`);
-  console.log(`  Active frames: ${statsAfter.activeFrameCount}`);
-  console.log(`  Note: Soft delete preserves data for recovery`);
+    console.log('\nAfter deletion:');
+    const statsAfter = mem.stats();
+    console.log('  Total frames: ' + statsAfter.frameCount);
+    console.log('  Active frames: ' + statsAfter.activeFrameCount);
+    console.log('  Note: Soft delete preserves data for recovery');
+  } catch (error) {
+    console.log('\nDelete error: ' + (error as Error).message);
+  }
 
   // -------------------------------------------------------------------------
   // Step 8: Timeline inspection
   // -------------------------------------------------------------------------
   console.log('\n--- Timeline Inspection ---\n');
 
-  const allEntries = mem.timeline({ limit: 100, reverse: true });
-  console.log(`Timeline entries (newest first): ${allEntries.length}`);
+  try {
+    const allEntries = mem.timeline({ limit: 100, reverse: true });
+    console.log('Timeline entries (newest first): ' + allEntries.length);
 
-  for (const entry of allEntries.slice(0, 5)) {
-    const date = new Date(entry.timestamp).toISOString();
-    console.log(`  [${entry.frameId}] ${date}`);
-    console.log(`       Preview: ${entry.preview.slice(0, 50)}...`);
-    console.log(`       URI: ${entry.uri || 'N/A'}`);
+    for (const entry of allEntries.slice(0, 5)) {
+      const date = new Date(entry.timestamp).toISOString();
+      console.log('  [' + entry.frameId + '] ' + date);
+      console.log('       Preview: ' + entry.preview.slice(0, 50) + '...');
+      console.log('       URI: ' + (entry.uri || 'N/A'));
+    }
+  } catch (error) {
+    console.log('Timeline error: ' + (error as Error).message);
   }
 
   // -------------------------------------------------------------------------
@@ -230,13 +242,13 @@ async function main() {
       const frameInfo = mem.frame(frameId);
       const content = mem.view(frameId);
 
-      console.log(`Frame ${frameId}:`);
-      console.log(`  Title: ${frameInfo.title}`);
-      console.log(`  Kind: ${frameInfo.kind}`);
-      console.log(`  Size: ${frameInfo.payloadLength} bytes`);
-      console.log(`  Content: ${content.slice(0, 50)}...`);
+      console.log('Frame ' + frameId + ':');
+      console.log('  Title: ' + frameInfo.title);
+      console.log('  Kind: ' + frameInfo.kind);
+      console.log('  Size: ' + frameInfo.payloadLength + ' bytes');
+      console.log('  Content: ' + content.slice(0, 50) + '...');
     } catch (error) {
-      console.log(`Frame ${frameId}: ${(error as Error).message}`);
+      console.log('Frame ' + frameId + ': ' + (error as Error).message);
     }
   }
 
@@ -261,53 +273,56 @@ async function main() {
   console.log('  3. Verify backup integrity');
 
   console.log('\nExample maintenance script:');
-  console.log(`
-  import { open, doctor } from '@fpisani/memvid';
-  import * as fs from 'fs';
-
-  function maintainFile(path: string) {
-    // 1. Create backup
-    const backupPath = path + '.backup';
-    fs.copyFileSync(path, backupPath);
-
-    // 2. Quick verification
-    const mem = open(path);
-    if (!mem.verify(false)) {
-      console.error('Quick verify failed!');
-      mem.close();
-      return false;
-    }
-
-    // 3. Check stats
-    const stats = mem.stats();
-    const deletionRatio = (stats.frameCount - stats.activeFrameCount) / stats.frameCount;
-    if (deletionRatio > 0.5) {
-      console.warn('High deletion ratio - consider compaction');
-    }
-
-    mem.close();
-
-    // 4. Run doctor
-    const result = doctor(path, true);
-    if (result.issuesFound > 0) {
-      console.log(\`Fixed \${result.issuesFixed}/\${result.issuesFound} issues\`);
-    }
-
-    return true;
-  }
-  `);
+  console.log('');
+  console.log("  import { open, doctor } from '../dist/index.js';");
+  console.log("  import * as fs from 'fs';");
+  console.log('');
+  console.log('  function maintainFile(path: string) {');
+  console.log('    // 1. Create backup');
+  console.log("    const backupPath = path + '.backup';");
+  console.log('    fs.copyFileSync(path, backupPath);');
+  console.log('');
+  console.log('    // 2. Quick verification');
+  console.log('    const mem = open(path);');
+  console.log('    if (!mem.verify(false)) {');
+  console.log("      console.error('Quick verify failed!');");
+  console.log('      mem.close();');
+  console.log('      return false;');
+  console.log('    }');
+  console.log('');
+  console.log('    // 3. Check stats');
+  console.log('    const stats = mem.stats();');
+  console.log('    const deletionRatio = (stats.frameCount - stats.activeFrameCount) / stats.frameCount;');
+  console.log('    if (deletionRatio > 0.5) {');
+  console.log("      console.warn('High deletion ratio - consider compaction');");
+  console.log('    }');
+  console.log('');
+  console.log('    mem.close();');
+  console.log('');
+  console.log('    // 4. Run doctor');
+  console.log('    const result = doctor(path, true);');
+  console.log('    if (result.issuesFound > 0) {');
+  console.log('      console.log("Fixed " + result.issuesFixed + "/" + result.issuesFound + " issues");');
+  console.log('    }');
+  console.log('');
+  console.log('    return true;');
+  console.log('  }');
 
   // -------------------------------------------------------------------------
   // Final cleanup
   // -------------------------------------------------------------------------
   console.log('\n--- Final Statistics ---\n');
 
-  const finalStats = mem.stats();
-  console.log(`Final file state:`);
-  console.log(`  Total frames: ${finalStats.frameCount}`);
-  console.log(`  Active frames: ${finalStats.activeFrameCount}`);
-  console.log(`  File size: ${finalStats.sizeBytes} bytes`);
-  console.log(`  File healthy: ${mem.verify(true) ? 'YES' : 'NO'}`);
+  try {
+    const finalStats = mem.stats();
+    console.log('Final file state:');
+    console.log('  Total frames: ' + finalStats.frameCount);
+    console.log('  Active frames: ' + finalStats.activeFrameCount);
+    console.log('  File size: ' + finalStats.sizeBytes + ' bytes');
+    console.log('  File healthy: ' + (mem.verify(true) ? 'YES' : 'NO'));
+  } catch (error) {
+    console.log('Final stats error: ' + (error as Error).message);
+  }
 
   mem.close();
   fs.unlinkSync(filePath);

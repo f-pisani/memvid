@@ -19,15 +19,16 @@
  *   data.mv2 --[lock]--> data.mv2e --[unlock]--> data.mv2
  */
 
-import { create, open, lock, unlock, version } from '@fpisani/memvid';
+import { create, open, lock, unlock, version } from '../dist/index.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as os from 'os';
 
 async function main() {
-  const basePath = './encryption-example';
-  const originalFile = `${basePath}.mv2`;
-  const encryptedFile = `${basePath}.mv2e`;
-  const decryptedFile = `${basePath}_decrypted.mv2`;
+  const basePath = path.join(os.tmpdir(), 'encryption-example');
+  const originalFile = basePath + '.mv2';
+  const encryptedFile = basePath + '.mv2e';
+  const decryptedFile = basePath + '_decrypted.mv2';
 
   // Clean up any existing files
   for (const file of [originalFile, encryptedFile, decryptedFile]) {
@@ -37,7 +38,7 @@ async function main() {
   }
 
   console.log('=== Encryption Example ===\n');
-  console.log(`Memvid version: ${version()}\n`);
+  console.log('Memvid version: ' + version() + '\n');
 
   // -------------------------------------------------------------------------
   // Step 1: Create a file with sensitive data
@@ -67,9 +68,9 @@ async function main() {
   mem.close();
 
   const originalSize = fs.statSync(originalFile).size;
-  console.log(`Created: ${originalFile}`);
-  console.log(`  Size: ${originalSize} bytes`);
-  console.log(`  Contains: ${sensitiveData.length} sensitive documents`);
+  console.log('Created: ' + originalFile);
+  console.log('  Size: ' + originalSize + ' bytes');
+  console.log('  Contains: ' + sensitiveData.length + ' sensitive documents');
 
   // -------------------------------------------------------------------------
   // Step 2: Lock (encrypt) the file
@@ -83,18 +84,18 @@ async function main() {
   console.log('Encryption parameters:');
   console.log('  - Algorithm: AES-256-GCM');
   console.log('  - Key derivation: Argon2id');
-  console.log(`  - Password length: ${password.length} characters`);
+  console.log('  - Password length: ' + password.length + ' characters');
 
   try {
     // lock() creates an encrypted copy with .mv2e extension
     const encryptedPath = lock(originalFile, password);
 
-    console.log(`\nEncrypted file created: ${encryptedPath}`);
+    console.log('\nEncrypted file created: ' + encryptedPath);
 
     if (fs.existsSync(encryptedPath)) {
       const encryptedSize = fs.statSync(encryptedPath).size;
-      console.log(`  Size: ${encryptedSize} bytes`);
-      console.log(`  Overhead: ${encryptedSize - originalSize} bytes (encryption metadata)`);
+      console.log('  Size: ' + encryptedSize + ' bytes');
+      console.log('  Overhead: ' + (encryptedSize - originalSize) + ' bytes (encryption metadata)');
     }
 
     // -------------------------------------------------------------------------
@@ -109,7 +110,7 @@ async function main() {
       console.log('  ERROR: Should not be able to open encrypted file!');
     } catch (error) {
       console.log('  Correctly rejected: Cannot open encrypted file directly');
-      console.log(`  Error: ${(error as Error).message.slice(0, 50)}...`);
+      console.log('  Error: ' + (error as Error).message.slice(0, 50) + '...');
     }
 
     // -------------------------------------------------------------------------
@@ -120,12 +121,12 @@ async function main() {
     // unlock() creates a decrypted copy with .mv2 extension
     const decryptedPath = unlock(encryptedPath, password);
 
-    console.log(`Decrypted file created: ${decryptedPath}`);
+    console.log('Decrypted file created: ' + decryptedPath);
 
     if (fs.existsSync(decryptedPath)) {
       const decryptedSize = fs.statSync(decryptedPath).size;
-      console.log(`  Size: ${decryptedSize} bytes`);
-      console.log(`  Matches original: ${decryptedSize === originalSize}`);
+      console.log('  Size: ' + decryptedSize + ' bytes');
+      console.log('  Matches original: ' + (decryptedSize === originalSize));
     }
 
     // -------------------------------------------------------------------------
@@ -136,21 +137,21 @@ async function main() {
     const decryptedMem = open(decryptedPath);
     const stats = decryptedMem.stats();
 
-    console.log(`Decrypted file stats:`);
-    console.log(`  Frame count: ${stats.frameCount}`);
-    console.log(`  Has lex index: ${stats.hasLexIndex}`);
+    console.log('Decrypted file stats:');
+    console.log('  Frame count: ' + stats.frameCount);
+    console.log('  Has lex index: ' + stats.hasLexIndex);
 
     // Verify all documents are intact
     const results = decryptedMem.find('sensitive', 10);
-    console.log(`\nSearching decrypted content:`);
-    console.log(`  Query: "sensitive"`);
-    console.log(`  Results: ${results.totalHits}`);
+    console.log('\nSearching decrypted content:');
+    console.log('  Query: "sensitive"');
+    console.log('  Results: ' + results.totalHits);
 
     // Check timeline
     const timeline = decryptedMem.timeline({ limit: 10 });
-    console.log(`\nTimeline entries: ${timeline.length}`);
+    console.log('\nTimeline entries: ' + timeline.length);
     for (const entry of timeline) {
-      console.log(`  [${entry.frameId}] ${entry.preview.slice(0, 40)}...`);
+      console.log('  [' + entry.frameId + '] ' + entry.preview.slice(0, 40) + '...');
     }
 
     decryptedMem.close();
@@ -168,7 +169,7 @@ async function main() {
       console.log('  ERROR: Should have failed with wrong password!');
     } catch (error) {
       console.log('  Correctly rejected: Invalid password');
-      console.log(`  Error type: ${(error as Error).message.includes('decrypt') ? 'Decryption failure' : 'Authentication failure'}`);
+      console.log('  Error type: ' + ((error as Error).message.includes('decrypt') ? 'Decryption failure' : 'Authentication failure'));
     }
 
     // -------------------------------------------------------------------------
@@ -195,28 +196,27 @@ async function main() {
     console.log('  - Consider full-disk encryption as additional layer');
 
     console.log('\nExample secure workflow:');
-    console.log(`
-    // Load password from environment
-    const password = process.env.MEMVID_PASSWORD;
-    if (!password) {
-      throw new Error('MEMVID_PASSWORD not set');
-    }
-
-    // Encrypt the file
-    const encryptedPath = lock('./data.mv2', password);
-
-    // Securely delete original
-    fs.unlinkSync('./data.mv2');
-
-    // Later: decrypt for use
-    const decryptedPath = unlock(encryptedPath, password);
-    const mem = open(decryptedPath);
-    // ... use the data ...
-    mem.close();
-
-    // Clean up decrypted copy when done
-    fs.unlinkSync(decryptedPath);
-    `);
+    console.log('');
+    console.log('    // Load password from environment');
+    console.log('    const password = process.env.MEMVID_PASSWORD;');
+    console.log('    if (!password) {');
+    console.log("      throw new Error('MEMVID_PASSWORD not set');");
+    console.log('    }');
+    console.log('');
+    console.log('    // Encrypt the file');
+    console.log("    const encryptedPath = lock('./data.mv2', password);");
+    console.log('');
+    console.log('    // Securely delete original');
+    console.log("    fs.unlinkSync('./data.mv2');");
+    console.log('');
+    console.log('    // Later: decrypt for use');
+    console.log('    const decryptedPath = unlock(encryptedPath, password);');
+    console.log('    const mem = open(decryptedPath);');
+    console.log('    // ... use the data ...');
+    console.log('    mem.close();');
+    console.log('');
+    console.log('    // Clean up decrypted copy when done');
+    console.log('    fs.unlinkSync(decryptedPath);');
 
     // Clean up encrypted file for this example
     if (fs.existsSync(encryptedPath)) {
@@ -226,7 +226,7 @@ async function main() {
     // Handle encryption feature not available
     if ((error as Error).message.includes('FEATURE_UNAVAILABLE')) {
       console.log('\nNote: Encryption feature is not enabled in this build.');
-      console.log('The encryption feature requires the `encryption` feature flag.');
+      console.log('The encryption feature requires the "encryption" feature flag.');
       console.log('Enable it with: cargo build --features encryption');
     } else {
       throw error;
@@ -241,7 +241,7 @@ async function main() {
   for (const file of [originalFile, encryptedFile, decryptedFile]) {
     if (fs.existsSync(file)) {
       fs.unlinkSync(file);
-      console.log(`Deleted: ${file}`);
+      console.log('Deleted: ' + file);
     }
   }
 

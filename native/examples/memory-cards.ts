@@ -16,8 +16,10 @@
  * making them ideal for agent state management.
  */
 
-import { create, open } from '@fpisani/memvid';
+import { create, open } from '../dist/index.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Helper to access native handle for memory card operations
 // The high-level Memvid class wraps the native handle
@@ -26,7 +28,7 @@ function getHandle(mem: any): any {
 }
 
 async function main() {
-  const filePath = './memory-example.mv2';
+  const filePath = path.join(os.tmpdir(), 'memory-example.mv2');
 
   // Clean up any existing file from previous runs
   if (fs.existsSync(filePath)) {

@@ -606,3 +606,76 @@ export function open(path: string): Memvid {
 export function version(): string {
   return native.version();
 }
+
+/**
+ * Encrypt a memvid file with a password.
+ * Creates an encrypted copy with .mv2e extension.
+ *
+ * @param path - Path to the .mv2 file to encrypt
+ * @param password - Password for encryption (must not be empty)
+ * @returns Path to the encrypted file (.mv2e)
+ *
+ * @example
+ * ```typescript
+ * const encryptedPath = lock('./data.mv2', 'my-secure-password');
+ * console.log('Encrypted file:', encryptedPath); // './data.mv2e'
+ * ```
+ */
+export function lock(path: string, password: string): string {
+  return native.lock(path, password);
+}
+
+/**
+ * Decrypt an encrypted memvid file.
+ * Creates a decrypted copy with .mv2 extension.
+ *
+ * @param path - Path to the .mv2e file to decrypt
+ * @param password - Password used for encryption
+ * @returns Path to the decrypted file (.mv2)
+ *
+ * @example
+ * ```typescript
+ * const decryptedPath = unlock('./data.mv2e', 'my-secure-password');
+ * console.log('Decrypted file:', decryptedPath); // './data.mv2'
+ * ```
+ */
+export function unlock(path: string, password: string): string {
+  return native.unlock(path, password);
+}
+
+/**
+ * Result from running the doctor diagnostic/repair tool
+ */
+export interface DoctorResult {
+  /** Number of issues found during diagnosis */
+  issuesFound: number;
+  /** Number of issues fixed during repair (0 if fix=false) */
+  issuesFixed: number;
+  /** Descriptions of actions taken */
+  actions: string[];
+}
+
+/**
+ * Run diagnostic checks on a memvid file and optionally repair issues.
+ *
+ * @param path - Path to the .mv2 file to check
+ * @param fix - If true, attempt to repair issues found (default: false)
+ * @returns Diagnostic results
+ *
+ * @example
+ * ```typescript
+ * // Diagnosis only (read-only)
+ * const result = doctor('./data.mv2');
+ * if (result.issuesFound > 0) {
+ *   console.log('Issues found:', result.issuesFound);
+ *   console.log('Actions:', result.actions);
+ * }
+ *
+ * // Diagnosis with repair
+ * const repairResult = doctor('./data.mv2', true);
+ * console.log('Issues fixed:', repairResult.issuesFixed);
+ * ```
+ */
+export function doctor(path: string, fix?: boolean): DoctorResult {
+  return native.doctor(path, fix);
+}

@@ -16,9 +16,11 @@
  * - Combined, they provide more robust retrieval
  */
 
-import { create, OpenAIEmbeddings, MockEmbeddings } from '@fpisani/memvid';
-import type { EmbeddingProvider } from '@fpisani/memvid';
+import { create, OpenAIEmbeddings, MockEmbeddings } from '../dist/index.js';
+import type { EmbeddingProvider } from '../dist/index.js';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Helper to access native handle
 function getHandle(mem: any): any {
@@ -35,7 +37,7 @@ function getEmbedder(): EmbeddingProvider {
 }
 
 async function main() {
-  const filePath = './hybrid-search-example.mv2';
+  const filePath = path.join(os.tmpdir(), 'hybrid-search-example.mv2');
 
   if (fs.existsSync(filePath)) {
     fs.unlinkSync(filePath);
@@ -122,11 +124,11 @@ async function main() {
       uri: doc.uri,
     });
 
-    console.log(`Indexed: ${doc.title}`);
+    console.log('Indexed:', doc.title);
   }
 
   mem.commit();
-  console.log(`\nTotal documents: ${mem.stats().frameCount}`);
+  console.log('\nTotal documents:', mem.stats().frameCount);
 
   // -------------------------------------------------------------------------
   // Step 3: Basic text search (lexical)
@@ -139,13 +141,13 @@ async function main() {
   const lexQuery = 'programming language';
   const lexResults = mem.find(lexQuery, 5);
 
-  console.log(`Query: "${lexQuery}"`);
-  console.log(`Found: ${lexResults.totalHits} results (engine: ${lexResults.engine})\n`);
+  console.log('Query: "' + lexQuery + '"');
+  console.log('Found: ' + lexResults.totalHits + ' results (engine: ' + lexResults.engine + ')\n');
 
   for (const hit of lexResults.hits.slice(0, 3)) {
-    console.log(`  [${hit.frameId}] ${hit.title}`);
-    console.log(`       Score: ${hit.score?.toFixed(4)}`);
-    console.log(`       Snippet: ${hit.text.slice(0, 80)}...`);
+    console.log('  [' + hit.frameId + '] ' + hit.title);
+    console.log('       Score: ' + hit.score?.toFixed(4));
+    console.log('       Snippet: ' + hit.text.slice(0, 80) + '...');
   }
 
   // -------------------------------------------------------------------------
@@ -160,13 +162,13 @@ async function main() {
   const vecQueryEmbedding = await embedder.embedQuery(vecQuery);
   const vecResults = mem.vecSearch(vecQueryEmbedding, 5);
 
-  console.log(`Query: "${vecQuery}"`);
-  console.log(`Found: ${vecResults.totalHits} results (engine: ${vecResults.engine})\n`);
+  console.log('Query: "' + vecQuery + '"');
+  console.log('Found: ' + vecResults.totalHits + ' results (engine: ' + vecResults.engine + ')\n');
 
   for (const hit of vecResults.hits.slice(0, 3)) {
-    console.log(`  [${hit.frameId}] ${hit.title}`);
-    console.log(`       Distance: ${hit.score?.toFixed(4)} (lower is better)`);
-    console.log(`       URI: ${hit.uri}`);
+    console.log('  [' + hit.frameId + '] ' + hit.title);
+    console.log('       Distance: ' + hit.score?.toFixed(4) + ' (lower is better)');
+    console.log('       URI: ' + hit.uri);
   }
 
   // -------------------------------------------------------------------------
@@ -185,13 +187,13 @@ async function main() {
     snippetChars: 150, // Max characters for text snippets
   });
 
-  console.log(`Query: "${hybridQuery}"`);
-  console.log(`Found: ${hybridResults.totalHits} results (engine: ${hybridResults.engine})\n`);
+  console.log('Query: "' + hybridQuery + '"');
+  console.log('Found: ' + hybridResults.totalHits + ' results (engine: ' + hybridResults.engine + ')\n');
 
   for (const hit of hybridResults.hits) {
-    console.log(`  [${hit.frameId}] ${hit.title || 'Untitled'}`);
-    console.log(`       Score: ${hit.score?.toFixed(4)}`);
-    console.log(`       Snippet: ${hit.text.slice(0, 100)}...`);
+    console.log('  [' + hit.frameId + '] ' + (hit.title || 'Untitled'));
+    console.log('       Score: ' + hit.score?.toFixed(4));
+    console.log('       Snippet: ' + hit.text.slice(0, 100) + '...');
   }
 
   // -------------------------------------------------------------------------
@@ -211,11 +213,11 @@ async function main() {
     snippetChars: 100,
   });
 
-  console.log(`Query: "${scopedQuery}" (scope: doc://ai/)`);
-  console.log(`Found: ${scopedResults.totalHits} results\n`);
+  console.log('Query: "' + scopedQuery + '" (scope: doc://ai/)');
+  console.log('Found: ' + scopedResults.totalHits + ' results\n');
 
   for (const hit of scopedResults.hits) {
-    console.log(`  [${hit.frameId}] ${hit.title} - ${hit.uri}`);
+    console.log('  [' + hit.frameId + '] ' + hit.title + ' - ' + hit.uri);
   }
 
   // -------------------------------------------------------------------------
@@ -245,23 +247,23 @@ async function main() {
     snippetChars: 100,
   });
 
-  console.log(`Query: "${adaptiveQuery}"`);
-  console.log(`Results returned: ${adaptiveResults.hits.length}\n`);
+  console.log('Query: "' + adaptiveQuery + '"');
+  console.log('Results returned: ' + adaptiveResults.hits.length + '\n');
 
   console.log('Adaptive Stats:');
-  console.log(`  - Total considered: ${adaptiveResults.stats.totalConsidered}`);
-  console.log(`  - Cutoff index: ${adaptiveResults.stats.cutoffIndex}`);
-  console.log(`  - Triggered by: ${adaptiveResults.stats.triggeredBy}`);
+  console.log('  - Total considered: ' + adaptiveResults.stats.totalConsidered);
+  console.log('  - Cutoff index: ' + adaptiveResults.stats.cutoffIndex);
+  console.log('  - Triggered by: ' + adaptiveResults.stats.triggeredBy);
   if (adaptiveResults.stats.topScore) {
-    console.log(`  - Top score: ${adaptiveResults.stats.topScore.toFixed(4)}`);
+    console.log('  - Top score: ' + adaptiveResults.stats.topScore.toFixed(4));
   }
   if (adaptiveResults.stats.cutoffScore) {
-    console.log(`  - Cutoff score: ${adaptiveResults.stats.cutoffScore.toFixed(4)}`);
+    console.log('  - Cutoff score: ' + adaptiveResults.stats.cutoffScore.toFixed(4));
   }
 
   console.log('\nSelected results:');
   for (const hit of adaptiveResults.hits) {
-    console.log(`  [${hit.frameId}] ${hit.title} (score: ${hit.score?.toFixed(4)})`);
+    console.log('  [' + hit.frameId + '] ' + hit.title + ' (score: ' + hit.score?.toFixed(4) + ')');
   }
 
   // -------------------------------------------------------------------------
@@ -279,9 +281,7 @@ async function main() {
       maxResults: 50,
     });
 
-    console.log(
-      `${strategy}: ${result.stats.returned} results (triggered by: ${result.stats.triggeredBy})`
-    );
+    console.log(strategy + ': ' + result.stats.returned + ' results (triggered by: ' + result.stats.triggeredBy + ')');
   }
 
   // -------------------------------------------------------------------------
@@ -331,9 +331,9 @@ async function main() {
   const manualQuery = 'typed JavaScript';
   const manualResults = await manualHybridSearch(mem, manualQuery, embedder, 5);
 
-  console.log(`Manual hybrid query: "${manualQuery}"`);
+  console.log('Manual hybrid query: "' + manualQuery + '"');
   for (const hit of manualResults) {
-    console.log(`  [${(hit as any).source}] ${hit.title} (frameId: ${hit.frameId})`);
+    console.log('  [' + (hit as any).source + '] ' + hit.title + ' (frameId: ' + hit.frameId + ')');
   }
 
   // -------------------------------------------------------------------------
