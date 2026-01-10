@@ -1,5 +1,3 @@
-#![cfg(feature = "lex")]
-
 #[cfg(feature = "temporal_track")]
 use super::helpers::attach_temporal_metadata;
 use super::helpers::{
@@ -218,7 +216,7 @@ pub(super) fn try_tantivy_search(
                 let age_seconds = (max_ts - timestamp).max(0) as f32;
                 // Decay factor: half-life of ~1 day for aggressive recency preference
                 // This ensures even a few days difference has significant impact
-                let decay_factor = 0.00000802; // ln(2) / 86400 (1 day)
+                let decay_factor = 0.000_008_02; // ln(2) / 86400 (1 day)
                 let recency_boost = (-decay_factor * age_seconds).exp();
                 // Combine: 40% BM25 + 60% recency boost - strongly prefer recent
                 let combined_score = bm25_score * 0.4 + (bm25_score * recency_boost * 0.6);

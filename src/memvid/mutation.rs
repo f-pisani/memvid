@@ -3558,7 +3558,7 @@ impl Memvid {
                             chunk_index: None,
                             chunk_count: None,
                             status: FrameStatus::Active,
-                            supersedes: supersedes,
+                            supersedes,
                             superseded_by: None,
                             source_sha256: None, // Not needed for search
                             source_path: None,   // Not needed for search

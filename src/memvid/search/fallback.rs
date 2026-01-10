@@ -1,5 +1,3 @@
-#![cfg(feature = "lex")]
-
 #[cfg(feature = "temporal_track")]
 use super::helpers::attach_temporal_metadata;
 use super::helpers::{build_context, empty_search_response, parse_cursor, timestamp_to_rfc3339};

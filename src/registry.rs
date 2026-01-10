@@ -146,7 +146,6 @@ fn registry_root() -> Result<PathBuf> {
             Ok(path) => return Ok(path),
             Err(err) if recoverable_dir_error(&err) => {
                 last_err = Some(err);
-                continue;
             }
             Err(err) => return Err(err.into()),
         }

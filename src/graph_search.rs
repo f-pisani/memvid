@@ -347,10 +347,10 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
         }
 
         QueryPlan::GraphOnly { pattern, limit } => {
-            let matcher = GraphMatcher::new(memvid);
-            let matches = matcher.execute(pattern);
+            let graph_matcher = GraphMatcher::new(memvid);
+            let results = graph_matcher.execute(pattern);
 
-            Ok(matches
+            Ok(results
                 .into_iter()
                 .take(*limit)
                 .map(|m| HybridSearchHit {
@@ -371,10 +371,10 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
             ..
         } => {
             // Step 1: Execute graph pattern to get candidate frames
-            let matcher = GraphMatcher::new(memvid);
-            let matches = matcher.execute(graph_filter);
-            let entity_map = matcher.get_matched_entities(&matches);
-            let candidate_frames = matcher.get_candidate_frames(&matches);
+            let graph_matcher = GraphMatcher::new(memvid);
+            let graph_results = graph_matcher.execute(graph_filter);
+            let entity_map = graph_matcher.get_matched_entities(&graph_results);
+            let candidate_frames = graph_matcher.get_candidate_frames(&graph_results);
 
             if candidate_frames.is_empty() {
                 // No graph matches - fall back to lexical search
