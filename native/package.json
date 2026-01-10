@@ -1,6 +1,6 @@
 {
   "name": "@fpisani/memvid",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Node.js bindings for memvid-core - unlimited local AI memory",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
