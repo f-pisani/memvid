@@ -44,3 +44,6 @@ vector_embedding.txt
 
 models/
 *.DS_Store
+
+# Documentation (auto-generated)
+docs/
