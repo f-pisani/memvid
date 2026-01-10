@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { Memvid, create, open, version } from '../dist/index.js';
+import { Memvid, create, open, version } from '../index.js';
 
 const TEST_DIR = os.tmpdir();
 

@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { Memvid, MockEmbeddings, OpenAIEmbeddings, CohereEmbeddings, VecNotEnabledError } from '../dist/index.js';
+import { Memvid, MockEmbeddings, OpenAIEmbeddings, CohereEmbeddings, VecNotEnabledError } from '../index.js';
 
 /** Generate a unique test file path */
 function uniqueTestFile(prefix: string): string {
