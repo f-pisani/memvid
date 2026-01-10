@@ -1,30 +1,25 @@
-# Examples
+# memvid-node Examples
 
-Example scripts demonstrating how to use `@fpisani/memvid`.
+Example scripts demonstrating how to use `@fpisani/memvid` from npm.
 
-## Prerequisites
-
-Build the package first:
+## Setup
 
 ```bash
-cd native
+cd examples
 npm install
-npm run build
 ```
 
 ## Running Examples
 
-Examples use [tsx](https://github.com/privatenumber/tsx) to run TypeScript directly:
-
 ```bash
 # Basic usage (no API key required)
-npx tsx examples/basic-usage.ts
+npm run basic
 
 # Vector search (requires OpenAI API key)
-OPENAI_API_KEY=sk-... npx tsx examples/vector-search.ts
+OPENAI_API_KEY=sk-... npm run vector
 
 # Batch ingestion (works with or without API key)
-OPENAI_API_KEY=sk-... npx tsx examples/batch-ingestion.ts
+OPENAI_API_KEY=sk-... npm run batch
 ```
 
 ## Examples

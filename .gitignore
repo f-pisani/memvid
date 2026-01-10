@@ -38,6 +38,9 @@ vector_embedding.txt
 *.xls
 *.csv
 *.json
+# Exception: example project config
+!examples/package.json
+!examples/package-lock.json
 
 models/
 *.DS_Store

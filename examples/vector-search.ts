@@ -7,7 +7,7 @@
  * Run: OPENAI_API_KEY=sk-... npx tsx examples/vector-search.ts
  */
 
-import { create, OpenAIEmbeddings } from '../dist/index.js';
+import { create, OpenAIEmbeddings } from '@fpisani/memvid';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

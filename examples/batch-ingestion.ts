@@ -7,8 +7,8 @@
  * Run: OPENAI_API_KEY=sk-... npx tsx examples/batch-ingestion.ts
  */
 
-import { create, OpenAIEmbeddings, MockEmbeddings } from '../dist/index.js';
-import type { EmbeddingProvider } from '../dist/index.js';
+import { create, OpenAIEmbeddings, MockEmbeddings } from '@fpisani/memvid';
+import type { EmbeddingProvider } from '@fpisani/memvid';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';

@@ -1,0 +1,19 @@
+{
+  "name": "memvid-examples",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Examples for @fpisani/memvid",
+  "type": "module",
+  "scripts": {
+    "basic": "tsx basic-usage.ts",
+    "vector": "tsx vector-search.ts",
+    "batch": "tsx batch-ingestion.ts"
+  },
+  "dependencies": {
+    "@fpisani/memvid": "^1.0.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  }
+}

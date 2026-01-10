@@ -7,7 +7,7 @@
  * Run: npx tsx examples/basic-usage.ts
  */
 
-import { create } from '../dist/index.js';
+import { create } from '@fpisani/memvid';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
