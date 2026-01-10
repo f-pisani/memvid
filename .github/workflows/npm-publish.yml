@@ -63,7 +63,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.target }}
-          path: native/*.node
+          path: |
+            native/*.node
+            native/index.js
+            native/index.d.ts
           if-no-files-found: error
 
   publish:
@@ -96,14 +99,11 @@ jobs:
         run: |
           # Move all .node files from artifacts subfolders to native folder
           find artifacts -name "*.node" -exec mv {} . \;
-          ls -la *.node
-
-      - name: Generate native binding entry point
-        working-directory: native
-        run: |
-          # napi artifacts generates index.js and index.d.ts for loading the correct .node file
-          npx napi artifacts
-          ls -la index.js index.d.ts
+          # Copy index.js and index.d.ts from any artifact (they're all the same)
+          find artifacts -name "index.js" -exec cp {} . \; 2>/dev/null || true
+          find artifacts -name "index.d.ts" -exec cp {} . \; 2>/dev/null || true
+          echo "=== Native files ==="
+          ls -la *.node index.js index.d.ts
 
       - name: Build TypeScript
         working-directory: native
