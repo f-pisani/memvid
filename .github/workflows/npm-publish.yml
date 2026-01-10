@@ -91,9 +91,12 @@ jobs:
       - name: List artifacts
         run: ls -R native/artifacts
 
-      - name: Move artifacts
+      - name: Move artifacts to native folder
         working-directory: native
-        run: npx napi artifacts --dir artifacts
+        run: |
+          # Move all .node files from artifacts subfolders to native folder
+          find artifacts -name "*.node" -exec mv {} . \;
+          ls -la *.node
 
       - name: Prepare packages
         working-directory: native
