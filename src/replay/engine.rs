@@ -227,17 +227,7 @@ impl<'a> ReplayEngine<'a> {
                             query: query.clone(),
                             top_k: replay_top_k,
                             snippet_chars: 120,
-                            uri: None,
-                            scope: None,
-                            cursor: None,
-                            #[cfg(feature = "temporal_track")]
-                            temporal: None,
-                            as_of_frame: None,
-                            as_of_ts: None,
-                            no_sketch: false,
-                            exclude_frame_ids: Vec::new(),
-                            exclude_uris: Vec::new(),
-                            memory_filters: Vec::new(),
+                            ..Default::default()
                         };
                         match self.mem.search(search_request) {
                             Ok(response) => {

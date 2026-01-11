@@ -174,7 +174,7 @@ pub use enrich::{EnrichmentContext, EnrichmentEngine, EnrichmentResult, RulesEng
 // Triplet extraction types for automatic SPO extraction
 pub use triplet::{ExtractionMode, ExtractionStats, TripletExtractor};
 // Graph-aware search for hybrid retrieval
-pub use graph_search::{GraphMatcher, QueryPlanner, hybrid_search};
+pub use graph_search::{GraphMatcher, QueryPlanner, hybrid_search, hybrid_search_with_options};
 // Embedding provider types for vector embedding generation
 pub use types::{
     BatchEmbeddingResult, EmbeddingConfig, EmbeddingProvider, EmbeddingProviderKind,
@@ -598,17 +598,7 @@ mod tests {
                 query: "memory".to_string(),
                 top_k: 10,
                 snippet_chars: 200,
-                uri: None,
-                scope: None,
-                cursor: None,
-                #[cfg(feature = "temporal_track")]
-                temporal: None,
-                as_of_frame: None,
-                as_of_ts: None,
-                no_sketch: false,
-                exclude_frame_ids: Vec::new(),
-                exclude_uris: Vec::new(),
-                memory_filters: Vec::new(),
+                ..Default::default()
             };
             let response = mem.search(request).expect("search");
             assert_eq!(response.hits.len(), 1);
@@ -620,17 +610,7 @@ mod tests {
                 query: "wal".to_string(),
                 top_k: 10,
                 snippet_chars: 200,
-                uri: None,
-                scope: None,
-                cursor: None,
-                #[cfg(feature = "temporal_track")]
-                temporal: None,
-                as_of_frame: None,
-                as_of_ts: None,
-                no_sketch: false,
-                exclude_frame_ids: Vec::new(),
-                exclude_uris: Vec::new(),
-                memory_filters: Vec::new(),
+                ..Default::default()
             };
             let response = reopened.search(request).expect("search reopened");
             assert_eq!(response.hits.len(), 1);
@@ -694,17 +674,7 @@ mod tests {
                     query: "capacity tickets".into(),
                     top_k: 5,
                     snippet_chars: 160,
-                    uri: None,
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("search");
 
@@ -758,17 +728,7 @@ mod tests {
                     query: "target segment".into(),
                     top_k: 5,
                     snippet_chars: 160,
-                    uri: None,
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("search");
 
@@ -846,16 +806,7 @@ mod tests {
                     top_k: 10,
                     snippet_chars: 120,
                     uri: Some("mv2://docs/pricing.md".into()),
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("uri search");
             assert_eq!(uri_response.engine, SearchEngineKind::Tantivy);
@@ -871,17 +822,8 @@ mod tests {
                     query: "tickets".into(),
                     top_k: 10,
                     snippet_chars: 120,
-                    uri: None,
                     scope: Some("mv2://docs/".into()),
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("scope search");
             assert_eq!(scope_response.engine, SearchEngineKind::Tantivy);
@@ -927,17 +869,7 @@ mod tests {
                     query: "tickets".into(),
                     top_k: 1,
                     snippet_chars: 90,
-                    uri: None,
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("page one");
             assert_eq!(first_page.engine, SearchEngineKind::Tantivy);
@@ -953,17 +885,8 @@ mod tests {
                     query: "tickets".into(),
                     top_k: 1,
                     snippet_chars: 90,
-                    uri: None,
-                    scope: None,
                     cursor: Some(cursor),
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("page two");
             assert_eq!(second_page.engine, SearchEngineKind::Tantivy);
@@ -997,17 +920,7 @@ mod tests {
                     query: "tickets".into(),
                     top_k: 5,
                     snippet_chars: 120,
-                    uri: None,
-                    scope: None,
-                    cursor: None,
-                    #[cfg(feature = "temporal_track")]
-                    temporal: None,
-                    as_of_frame: None,
-                    as_of_ts: None,
-                    no_sketch: false,
-                    exclude_frame_ids: Vec::new(),
-                    exclude_uris: Vec::new(),
-                    memory_filters: Vec::new(),
+                    ..Default::default()
                 })
                 .expect("search with tantivy");
 

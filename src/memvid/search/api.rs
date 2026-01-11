@@ -197,14 +197,22 @@ impl Memvid {
         query: &[f32],
         limit: usize,
     ) -> Result<Vec<crate::clip::ClipSearchHit>> {
-        tracing::debug!(
-            "search_clip: clip_enabled={} query_len={} limit={}",
-            self.clip_enabled,
-            query.len(),
-            limit
-        );
+        self.search_clip_with_options(query, limit, &[])
+    }
+
+    /// Search CLIP index with memory filter support.
+    ///
+    /// Memory filters are applied at query time to respect topK semantics.
+    /// When filters are provided, only frames with matching memory cards are searched.
+    pub fn search_clip_with_options(
+        &mut self,
+        query: &[f32],
+        limit: usize,
+        memory_filters: &[crate::types::MemoryFilter],
+    ) -> Result<Vec<crate::clip::ClipSearchHit>> {
+        use super::helpers::compute_memory_filter_candidates;
+
         if !self.clip_enabled {
-            tracing::debug!("search_clip: CLIP not enabled, returning error");
             return Err(MemvidError::ClipNotEnabled);
         }
         self.ensure_clip_index()?;
@@ -212,9 +220,24 @@ impl Memvid {
             .clip_index
             .as_ref()
             .ok_or(MemvidError::ClipNotEnabled)?;
-        tracing::debug!("search_clip: clip_index has {} documents", index.len());
-        let hits = index.search(query, limit);
-        tracing::debug!("search_clip: returning {} hits", hits.len());
+
+        // Compute memory filter candidates at query time
+        let memory_candidates = compute_memory_filter_candidates(self, memory_filters);
+
+        // If memory filters specified but no matches, return empty results
+        if let Some(ref candidates) = memory_candidates {
+            if candidates.is_empty() {
+                return Ok(vec![]);
+            }
+        }
+
+        let hits = index.search_with_filter(query, limit, memory_candidates.as_ref());
+        tracing::debug!(
+            limit,
+            filters = memory_filters.len(),
+            hits = hits.len(),
+            "clip search complete"
+        );
         Ok(hits)
     }
 
@@ -236,7 +259,35 @@ impl Memvid {
         snippet_chars: usize,
         scope: Option<&str>,
     ) -> Result<crate::types::SearchResponse> {
-        use super::helpers::{build_context, timestamp_to_rfc3339};
+        self.vec_search_with_options(
+            query,
+            query_embedding,
+            top_k,
+            snippet_chars,
+            scope,
+            &[],
+            false,
+        )
+    }
+
+    /// Perform pure vector search with full options including memory filters.
+    ///
+    /// Memory filters are applied at query time to respect topK semantics.
+    /// When `include_cards` is true, memory cards are attached to each hit.
+    pub fn vec_search_with_options(
+        &mut self,
+        query: &str,
+        query_embedding: &[f32],
+        top_k: usize,
+        snippet_chars: usize,
+        scope: Option<&str>,
+        memory_filters: &[crate::types::MemoryFilter],
+        include_cards: bool,
+    ) -> Result<crate::types::SearchResponse> {
+        use super::helpers::{
+            attach_cards_to_hits, build_context, compute_memory_filter_candidates,
+            timestamp_to_rfc3339,
+        };
         use crate::types::{
             SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse,
         };
@@ -269,6 +320,32 @@ impl Memvid {
 
         let start_time = Instant::now();
 
+        // Compute memory filter candidates at query time
+        let memory_candidates = compute_memory_filter_candidates(self, memory_filters);
+        // Track whether memory filters are active to report correct engine kind
+        let uses_memory_filters = memory_candidates.is_some();
+
+        // If memory filters specified but no matches, return empty results
+        if let Some(ref candidates) = memory_candidates {
+            if candidates.is_empty() {
+                let elapsed_ms = start_time.elapsed().as_millis();
+                return Ok(SearchResponse {
+                    query: query.to_string(),
+                    elapsed_ms,
+                    total_hits: 0,
+                    params: SearchParams {
+                        top_k,
+                        snippet_chars,
+                        cursor: None,
+                    },
+                    hits: Vec::new(),
+                    context: build_context(&[]),
+                    next_cursor: None,
+                    engine: SearchEngineKind::Hybrid,
+                });
+            }
+        }
+
         // Ensure vector index is loaded
         if !ensured_vec_index {
             self.ensure_vec_index()?;
@@ -276,8 +353,9 @@ impl Memvid {
 
         let vec_index = self.vec_index.as_ref().ok_or(MemvidError::VecNotEnabled)?;
 
-        // Do pure vector search over entire index
-        let vec_hits = vec_index.search(query_embedding, top_k * 2);
+        // Do vector search with candidate filter (respects topK)
+        let vec_hits =
+            vec_index.search_with_filter(query_embedding, top_k * 2, memory_candidates.as_ref());
 
         if vec_hits.is_empty() {
             let elapsed_ms = start_time.elapsed().as_millis();
@@ -293,7 +371,12 @@ impl Memvid {
                 hits: Vec::new(),
                 context: build_context(&[]),
                 next_cursor: None,
-                engine: SearchEngineKind::Hybrid,
+                // Vec-only when no memory filters, Hybrid when using filters
+                engine: if uses_memory_filters {
+                    SearchEngineKind::Hybrid
+                } else {
+                    SearchEngineKind::Vec
+                },
             });
         }
 
@@ -362,6 +445,7 @@ impl Memvid {
                 chunk_text: Some(snippet),
                 score: Some(similarity_score),
                 metadata: Some(metadata),
+                cards: Vec::new(),
             });
 
             if hits.len() >= top_k {
@@ -373,6 +457,11 @@ impl Memvid {
 
         #[cfg(feature = "temporal_track")]
         super::helpers::attach_temporal_metadata(self, &mut hits)?;
+
+        // Attach memory cards if requested (avoids N+1 queries)
+        if include_cards {
+            attach_cards_to_hits(&mut hits, self);
+        }
 
         let context = build_context(&hits);
 
@@ -388,7 +477,12 @@ impl Memvid {
             hits,
             context,
             next_cursor: None,
-            engine: SearchEngineKind::Hybrid,
+            // Vec-only when no memory filters, Hybrid when using filters
+            engine: if uses_memory_filters {
+                SearchEngineKind::Hybrid
+            } else {
+                SearchEngineKind::Vec
+            },
         })
     }
 

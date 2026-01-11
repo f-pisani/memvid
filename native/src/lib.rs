@@ -10,7 +10,9 @@ use napi::bindgen_prelude::*;
 use napi_derive::napi;
 use serde::{Deserialize, Serialize};
 
-use memvid_core::graph_search::{hybrid_search as rust_graph_hybrid_search, QueryPlanner};
+use memvid_core::graph_search::{
+    hybrid_search_with_options as rust_graph_hybrid_search_with_options, QueryPlanner,
+};
 use memvid_core::reader::{DocumentFormat, ReaderHint, ReaderRegistry};
 use memvid_core::table::{
     export_to_csv, export_to_json, extract_tables_from_pdf, get_table as rust_get_table,
@@ -405,6 +407,8 @@ pub struct SearchHit {
     pub title: Option<String>,
     /// Frame URI
     pub uri: Option<String>,
+    /// Memory cards associated with this frame (when includeCards is true)
+    pub cards: Option<Vec<JsMemoryCardSummary>>,
 }
 
 /// Search response
@@ -421,6 +425,31 @@ pub struct SearchResult {
     pub cursor: Option<String>,
 }
 
+/// Summary of a memory card (used in includeCards responses)
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsMemoryCardSummary {
+    /// The entity this memory is about
+    pub entity: String,
+    /// The attribute/slot being described
+    pub slot: String,
+    /// The actual value
+    pub value: String,
+    /// Memory kind: "Fact", "Preference", "Event", etc.
+    pub kind: String,
+}
+
+impl JsMemoryCardSummary {
+    fn from_core(card: &memvid_core::types::MemoryCardSummary) -> Self {
+        Self {
+            entity: card.entity.clone(),
+            slot: card.slot.clone(),
+            value: card.value.clone(),
+            kind: format!("{:?}", card.kind),
+        }
+    }
+}
+
 /// A single CLIP visual search hit
 #[napi(object)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -431,6 +460,8 @@ pub struct ClipSearchHitResult {
     pub page: Option<i32>,
     /// L2 distance to query (lower is more similar)
     pub distance: f64,
+    /// Memory cards associated with this frame (when includeCards is true)
+    pub cards: Option<Vec<JsMemoryCardSummary>>,
 }
 
 /// Memory filter for restricting search to frames with matching Memory Cards.
@@ -462,6 +493,60 @@ impl JsMemoryFilter {
     }
 }
 
+/// Convert optional JS memory filters to core memory filters
+fn convert_memory_filters(
+    filters: Option<Vec<JsMemoryFilter>>,
+) -> Vec<memvid_core::types::MemoryFilter> {
+    filters
+        .unwrap_or_default()
+        .iter()
+        .map(|f| f.to_core())
+        .collect()
+}
+
+/// Get memory cards for a frame ID
+fn get_cards_for_frame(memvid: &Memvid, frame_id: u64) -> Vec<JsMemoryCardSummary> {
+    memvid
+        .get_frame_memory_cards(frame_id)
+        .iter()
+        .map(|c| JsMemoryCardSummary {
+            entity: c.entity.clone(),
+            slot: c.slot.clone(),
+            value: c.value.clone(),
+            kind: format!("{:?}", c.kind),
+        })
+        .collect()
+}
+
+/// Convert core SearchHit to NAPI SearchHit
+///
+/// When `include_cards` is true, cards from the core hit are included if present.
+fn convert_search_hit(
+    hit: memvid_core::types::SearchHit,
+    include_cards: bool,
+) -> napi::Result<SearchHit> {
+    let cards = if include_cards && !hit.cards.is_empty() {
+        Some(
+            hit.cards
+                .iter()
+                .map(JsMemoryCardSummary::from_core)
+                .collect(),
+        )
+    } else {
+        None
+    };
+    Ok(SearchHit {
+        frame_id: u64_to_i64(hit.frame_id)?,
+        score: hit.score.map(|s| s as f64),
+        text: hit.text,
+        range_start: hit.range.0 as i64,
+        range_end: hit.range.1 as i64,
+        title: hit.title,
+        uri: Some(hit.uri),
+        cards,
+    })
+}
+
 /// Options for hybrid search
 #[napi(object)]
 #[derive(Debug, Clone, Default)]
@@ -470,6 +555,10 @@ pub struct HybridSearchOptions {
     pub snippet_chars: Option<i32>,
     /// URI scope filter (prefix match)
     pub scope: Option<String>,
+    /// Filter by memory cards at query time
+    pub memory_filters: Option<Vec<JsMemoryFilter>>,
+    /// Include memory cards in results
+    pub include_cards: Option<bool>,
 }
 
 /// Options for adaptive search
@@ -643,10 +732,24 @@ pub struct AskResponseOutput {
 pub struct GraphSearchOptions {
     /// Maximum number of results to return
     pub top_k: Option<i32>,
-    /// Maximum characters for snippets
-    pub snippet_chars: Option<i32>,
     /// URI scope filter (prefix match)
     pub scope: Option<String>,
+    /// Filter by memory cards at query time
+    pub memory_filters: Option<Vec<JsMemoryFilter>>,
+    /// Include memory cards in results
+    pub include_cards: Option<bool>,
+}
+
+/// Options for CLIP search
+#[napi(object)]
+#[derive(Debug, Clone, Default)]
+pub struct ClipSearchOptions {
+    /// Maximum number of results to return
+    pub top_k: Option<i32>,
+    /// Filter by memory cards at query time
+    pub memory_filters: Option<Vec<JsMemoryFilter>>,
+    /// Include memory cards in results
+    pub include_cards: Option<bool>,
 }
 
 /// A single graph search hit
@@ -665,6 +768,8 @@ pub struct GraphSearchHit {
     pub matched_entity: Option<String>,
     /// Frame content preview
     pub preview: Option<String>,
+    /// Memory cards associated with this frame (when includeCards is true)
+    pub cards: Option<Vec<JsMemoryCardSummary>>,
 }
 
 /// Result of graph search including execution plan info
@@ -1059,7 +1164,7 @@ impl MemvidHandle {
 
     /// Search for documents
     ///
-    /// Supports filtering by URI, scope, exclusions, and memory filters.
+    /// Supports filtering by URI, scope, exclusions, memory filters, and includeCards.
     #[napi]
     pub fn find(
         &self,
@@ -1070,6 +1175,7 @@ impl MemvidHandle {
         exclude_ids: Option<Vec<i64>>,
         exclude_uris: Option<Vec<String>>,
         memory_filters: Option<Vec<JsMemoryFilter>>,
+        include_cards: Option<bool>,
     ) -> napi::Result<SearchResult> {
         // Validate limit before entering closure to avoid move issues
         let top_k_usize = i32_to_usize(limit.unwrap_or(10))?;
@@ -1080,12 +1186,8 @@ impl MemvidHandle {
             .filter_map(|id| if id >= 0 { Some(id as u64) } else { None })
             .collect();
         let exclude_uris = exclude_uris.unwrap_or_default();
-        // Convert JsMemoryFilter to core MemoryFilter
-        let memory_filters_core: Vec<memvid_core::types::MemoryFilter> = memory_filters
-            .unwrap_or_default()
-            .iter()
-            .map(|f| f.to_core())
-            .collect();
+        let memory_filters_core = convert_memory_filters(memory_filters);
+        let include_cards_flag = include_cards.unwrap_or(false);
 
         self.with_memvid(move |memvid| {
             let request = memvid_core::SearchRequest {
@@ -1101,6 +1203,7 @@ impl MemvidHandle {
                 exclude_frame_ids,
                 exclude_uris,
                 memory_filters: memory_filters_core,
+                include_cards: include_cards_flag,
             };
 
             let response = memvid.search(request).map_err(memvid_to_napi_error)?;
@@ -1108,17 +1211,7 @@ impl MemvidHandle {
             let hits: napi::Result<Vec<SearchHit>> = response
                 .hits
                 .into_iter()
-                .map(|h| {
-                    Ok(SearchHit {
-                        frame_id: u64_to_i64(h.frame_id)?,
-                        score: h.score.map(|s| s as f64),
-                        text: h.text,
-                        range_start: h.range.0 as i64, // usize, safe on 64-bit
-                        range_end: h.range.1 as i64,   // usize, safe on 64-bit
-                        title: h.title,
-                        uri: Some(h.uri),
-                    })
-                })
+                .map(|h| convert_search_hit(h, include_cards_flag))
                 .collect();
 
             Ok(SearchResult {
@@ -1155,7 +1248,7 @@ impl MemvidHandle {
     ///
     /// Returns the top_k most similar frames to the query embedding.
     /// Requires vec index to be enabled.
-    /// Supports filtering by exclude_frame_ids and exclude_uris.
+    /// Supports filtering by memory_filters (at query time), exclude_frame_ids, and exclude_uris.
     #[napi]
     pub fn vec_search(
         &self,
@@ -1165,6 +1258,8 @@ impl MemvidHandle {
         scope: Option<String>,
         exclude_ids: Option<Vec<i64>>,
         exclude_uris_param: Option<Vec<String>>,
+        memory_filters: Option<Vec<JsMemoryFilter>>,
+        include_cards: Option<bool>,
     ) -> napi::Result<SearchResult> {
         // Validate inputs before entering closure
         validate_embedding_size(&query_embedding)?;
@@ -1179,70 +1274,47 @@ impl MemvidHandle {
             exclude_uris_param.unwrap_or_default().into_iter().collect();
         let filter_uri = uri;
         let filter_scope = scope;
+        let memory_filters_core = convert_memory_filters(memory_filters);
+        let include_cards_flag = include_cards.unwrap_or(false);
 
         self.with_memvid(move |memvid| {
             // Convert f64 to f32
             let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
-            // Get more results than needed if filtering, to account for exclusions
-            let fetch_limit = if exclude_frame_ids.is_empty()
-                && exclude_uris.is_empty()
-                && filter_uri.is_none()
-                && filter_scope.is_none()
-            {
-                limit
-            } else {
-                limit * 3 // Fetch extra to account for filtering
-            };
-
-            let vec_hits = memvid
-                .search_vec(&query_f32, fetch_limit)
+            // Use vec_search_with_options for memory filter support at query time
+            let response = memvid
+                .vec_search_with_options(
+                    "", // query string (not used for pure vec search)
+                    &query_f32,
+                    limit,
+                    200, // snippet_chars
+                    filter_scope.as_deref(),
+                    &memory_filters_core,
+                    include_cards_flag,
+                )
                 .map_err(memvid_to_napi_error)?;
 
-            // Get frame info for filtering by URI
+            // Convert response hits to NAPI format, applying URI and exclude filters
             let mut hits: Vec<SearchHit> = Vec::new();
-            for h in vec_hits {
+            for h in response.hits {
                 // Apply exclude_frame_ids filter
                 if exclude_frame_ids.contains(&h.frame_id) {
                     continue;
                 }
 
-                // Get frame info for URI-based filtering
-                let frame = memvid.frame_by_id(h.frame_id).ok();
-                let frame_uri = frame
-                    .as_ref()
-                    .and_then(|f| f.uri.clone())
-                    .unwrap_or_else(|| format!("mv2://{}", h.frame_id));
-                let frame_title = frame.as_ref().and_then(|f| f.title.clone());
-
                 // Apply exclude_uris filter
-                if exclude_uris.contains(&frame_uri) {
+                if exclude_uris.contains(&h.uri) {
                     continue;
                 }
 
                 // Apply uri filter (exact match)
                 if let Some(ref uri) = filter_uri {
-                    if &frame_uri != uri {
+                    if &h.uri != uri {
                         continue;
                     }
                 }
 
-                // Apply scope filter (prefix match)
-                if let Some(ref scope) = filter_scope {
-                    if !frame_uri.starts_with(scope) {
-                        continue;
-                    }
-                }
-
-                hits.push(SearchHit {
-                    frame_id: u64_to_i64(h.frame_id)?,
-                    score: Some(h.distance as f64),
-                    text: String::new(), // VecSearchHit doesn't include text
-                    range_start: 0,
-                    range_end: 0,
-                    title: frame_title,
-                    uri: Some(frame_uri),
-                });
+                hits.push(convert_search_hit(h, include_cards_flag)?);
 
                 if hits.len() >= limit {
                     break;
@@ -1250,10 +1322,10 @@ impl MemvidHandle {
             }
 
             Ok(SearchResult {
-                total_hits: hits.len() as i64, // Vec length is always safe
+                total_hits: response.total_hits as i64,
                 hits,
-                engine: "Vec".to_string(),
-                cursor: None,
+                engine: format!("{:?}", response.engine),
+                cursor: response.next_cursor,
             })
         })
     }
@@ -1328,32 +1400,43 @@ impl MemvidHandle {
     /// Returns the top_k most similar frames to the query embedding.
     /// Use an external CLIP model to generate the query embedding from text or image.
     /// Results are sorted by distance (lower is more similar).
+    ///
+    /// Supports memory filters to restrict results to frames with matching memory cards.
     #[napi]
     pub fn clip_search(
         &self,
         query_embedding: Vec<f64>,
-        limit: Option<i32>,
+        options: Option<ClipSearchOptions>,
     ) -> napi::Result<Vec<ClipSearchHitResult>> {
         // Validate inputs before entering closure
         validate_embedding_size(&query_embedding)?;
-        let top_k = i32_to_usize(limit.unwrap_or(10))?;
+        let opts = options.unwrap_or_default();
+        let top_k = i32_to_usize(opts.top_k.unwrap_or(10))?;
+        let memory_filters_core = convert_memory_filters(opts.memory_filters);
+        let include_cards_flag = opts.include_cards.unwrap_or(false);
 
         self.with_memvid(move |memvid| {
             // Convert f64 to f32
             let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
             let clip_hits = memvid
-                .search_clip(&query_f32, top_k)
+                .search_clip_with_options(&query_f32, top_k, &memory_filters_core)
                 .map_err(memvid_to_napi_error)?;
 
             // Convert ClipSearchHit to ClipSearchHitResult
             let hits: napi::Result<Vec<ClipSearchHitResult>> = clip_hits
                 .into_iter()
                 .map(|h| {
+                    let cards = if include_cards_flag {
+                        Some(get_cards_for_frame(memvid, h.frame_id))
+                    } else {
+                        None
+                    };
                     Ok(ClipSearchHitResult {
                         frame_id: u64_to_i64(h.frame_id)?,
                         page: h.page.map(|p| p as i32),
                         distance: h.distance as f64,
+                        cards,
                     })
                 })
                 .collect();
@@ -1367,6 +1450,8 @@ impl MemvidHandle {
     /// Performs vector similarity search using the pre-computed embedding.
     /// The query string is used for snippet generation and metadata.
     /// Requires vec index to be enabled.
+    ///
+    /// Supports memory filters to restrict results to frames with matching memory cards.
     #[napi]
     pub fn hybrid_search(
         &self,
@@ -1380,35 +1465,29 @@ impl MemvidHandle {
         let top_k = i32_to_usize(limit.unwrap_or(10))?;
         let opts = options.unwrap_or_default();
         let snippet_chars = i32_to_usize(opts.snippet_chars.unwrap_or(200))?;
+        let memory_filters_core = convert_memory_filters(opts.memory_filters);
+        let include_cards_flag = opts.include_cards.unwrap_or(false);
 
         self.with_memvid(move |memvid| {
             // Convert f64 to f32
             let embedding_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
 
             let response = memvid
-                .vec_search_with_embedding(
+                .vec_search_with_options(
                     &query,
                     &embedding_f32,
                     top_k,
                     snippet_chars,
                     opts.scope.as_deref(),
+                    &memory_filters_core,
+                    include_cards_flag,
                 )
                 .map_err(memvid_to_napi_error)?;
 
             let hits: napi::Result<Vec<SearchHit>> = response
                 .hits
                 .into_iter()
-                .map(|h| {
-                    Ok(SearchHit {
-                        frame_id: u64_to_i64(h.frame_id)?,
-                        score: h.score.map(|s| s as f64),
-                        text: h.text,
-                        range_start: h.range.0 as i64,
-                        range_end: h.range.1 as i64,
-                        title: h.title,
-                        uri: Some(h.uri),
-                    })
-                })
+                .map(|h| convert_search_hit(h, include_cards_flag))
                 .collect();
 
             Ok(SearchResult {
@@ -1502,21 +1581,11 @@ impl MemvidHandle {
                 )
                 .map_err(memvid_to_napi_error)?;
 
-            // Convert SearchHit results to NAPI SearchHit
+            // Convert SearchHit results (adaptive_search doesn't support includeCards)
             let hits: napi::Result<Vec<SearchHit>> = result
                 .results
                 .into_iter()
-                .map(|h| {
-                    Ok(SearchHit {
-                        frame_id: u64_to_i64(h.frame_id)?,
-                        score: h.score.map(|s| s as f64),
-                        text: h.text,
-                        range_start: h.range.0 as i64,
-                        range_end: h.range.1 as i64,
-                        title: h.title,
-                        uri: Some(h.uri),
-                    })
-                })
+                .map(|h| convert_search_hit(h, false))
                 .collect();
 
             // Convert AdaptiveStats to AdaptiveStatsResult
@@ -1542,6 +1611,8 @@ impl MemvidHandle {
     ///
     /// This provides intelligent retrieval that leverages structured knowledge (memory cards)
     /// when the query references known entities.
+    ///
+    /// Supports memory filters to restrict results to frames with matching memory cards.
     #[napi]
     pub fn graph_search(
         &self,
@@ -1550,6 +1621,8 @@ impl MemvidHandle {
     ) -> napi::Result<GraphSearchResult> {
         let opts = options.unwrap_or_default();
         let top_k = i32_to_usize(opts.top_k.unwrap_or(10))?;
+        let memory_filters_core = convert_memory_filters(opts.memory_filters);
+        let include_cards_flag = opts.include_cards.unwrap_or(false);
 
         self.with_memvid(move |memvid| {
             // Create query planner and analyze the query
@@ -1565,14 +1638,20 @@ impl MemvidHandle {
                 memvid_core::types::QueryPlan::Hybrid { .. } => "hybrid".to_string(),
             };
 
-            // Execute the hybrid search using the graph_search module
+            // Execute the hybrid search using the graph_search module with memory filters
             let hybrid_hits =
-                rust_graph_hybrid_search(memvid, &plan).map_err(memvid_to_napi_error)?;
+                rust_graph_hybrid_search_with_options(memvid, &plan, &memory_filters_core)
+                    .map_err(memvid_to_napi_error)?;
 
             // Convert HybridSearchHit results to NAPI GraphSearchHit
             let hits: napi::Result<Vec<GraphSearchHit>> = hybrid_hits
                 .iter()
                 .map(|h| {
+                    let cards = if include_cards_flag {
+                        Some(get_cards_for_frame(memvid, h.frame_id))
+                    } else {
+                        None
+                    };
                     Ok(GraphSearchHit {
                         frame_id: u64_to_i64(h.frame_id)?,
                         score: h.score as f64,
@@ -1580,6 +1659,7 @@ impl MemvidHandle {
                         vector_score: h.vector_score as f64,
                         matched_entity: h.matched_entity.clone(),
                         preview: h.preview.clone(),
+                        cards,
                     })
                 })
                 .collect();
@@ -1703,22 +1783,12 @@ impl MemvidHandle {
                 })
                 .collect();
 
-            // Convert search hits
+            // Convert search hits (ask doesn't support includeCards)
             let hits: napi::Result<Vec<SearchHit>> = response
                 .retrieval
                 .hits
                 .into_iter()
-                .map(|h| {
-                    Ok(SearchHit {
-                        frame_id: u64_to_i64(h.frame_id)?,
-                        score: h.score.map(|s| s as f64),
-                        text: h.text,
-                        range_start: h.range.0 as i64,
-                        range_end: h.range.1 as i64,
-                        title: h.title,
-                        uri: Some(h.uri),
-                    })
-                })
+                .map(|h| convert_search_hit(h, false))
                 .collect();
 
             // Build context string from fragments
@@ -2018,6 +2088,23 @@ impl MemvidHandle {
             memvid.clear_memories();
             Ok(())
         })
+    }
+
+    /// Get all entities that have a specific slot
+    ///
+    /// Useful for pre-filtering search by slot presence.
+    /// Returns a sorted list of unique entity names.
+    ///
+    /// # Arguments
+    /// * `slot` - The slot/attribute to search for
+    /// * `value` - Optional value to filter by (exact match)
+    #[napi]
+    pub fn get_entities_by_slot(
+        &self,
+        slot: String,
+        value: Option<String>,
+    ) -> napi::Result<Vec<String>> {
+        self.with_memvid(move |memvid| Ok(memvid.get_entities_by_slot(&slot, value.as_deref())))
     }
 
     // ========================================================================

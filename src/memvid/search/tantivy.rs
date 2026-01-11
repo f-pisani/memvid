@@ -351,6 +351,7 @@ pub(super) fn try_tantivy_search(
                 chunk_text: Some(chunk_text.clone()),
                 score: Some(hit.score),
                 metadata: Some(metadata),
+                cards: Vec::new(),
             });
             produced += 1;
         }

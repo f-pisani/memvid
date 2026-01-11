@@ -7,6 +7,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::memvid::search::helpers::compute_memory_filter_candidates;
 use crate::types::{
     GraphMatchResult, GraphPattern, HybridSearchHit, PatternTerm, QueryPlan, SearchRequest,
     TriplePattern,
@@ -311,17 +312,7 @@ fn basic_search_request(query: &str, top_k: usize) -> SearchRequest {
         query: query.to_string(),
         top_k,
         snippet_chars: 200,
-        uri: None,
-        scope: None,
-        cursor: None,
-        #[cfg(feature = "temporal_track")]
-        temporal: None,
-        as_of_frame: None,
-        as_of_ts: None,
-        no_sketch: false,
-        exclude_frame_ids: Vec::new(),
-        exclude_uris: Vec::new(),
-        memory_filters: Vec::new(),
+        ..Default::default()
     }
 }
 
@@ -344,12 +335,36 @@ fn search_hits_to_hybrid(hits: &[crate::types::SearchHit]) -> Vec<HybridSearchHi
 
 /// Execute a hybrid search: graph filter + vector ranking.
 pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<HybridSearchHit>> {
+    hybrid_search_with_options(memvid, plan, &[])
+}
+
+/// Execute a hybrid search with memory filter support.
+///
+/// Memory filters are applied at query time to restrict results to frames
+/// that have matching memory cards.
+pub fn hybrid_search_with_options(
+    memvid: &mut Memvid,
+    plan: &QueryPlan,
+    memory_filters: &[crate::types::MemoryFilter],
+) -> Result<Vec<HybridSearchHit>> {
+    // Use shared helper to compute memory filter candidates
+    let memory_candidates = compute_memory_filter_candidates(memvid, memory_filters);
+
+    // If memory filters specified but no matches, return early with empty results
+    if let Some(ref candidates) = memory_candidates {
+        if candidates.is_empty() {
+            return Ok(vec![]);
+        }
+    }
+
     match plan {
         QueryPlan::VectorOnly {
             query_text, top_k, ..
         } => {
             let query = query_text.as_deref().unwrap_or("");
-            let response = memvid.search(basic_search_request(query, *top_k))?;
+            let mut request = basic_search_request(query, *top_k);
+            request.memory_filters = memory_filters.to_vec();
+            let response = memvid.search(request)?;
             Ok(search_hits_to_hybrid(&response.hits))
         }
 
@@ -357,8 +372,14 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
             let graph_matcher = GraphMatcher::new(memvid);
             let results = graph_matcher.execute(pattern);
 
-            Ok(results
+            let filtered_results: Vec<_> = results
                 .into_iter()
+                .filter(|m| {
+                    // Apply memory filter: keep only if frame is in candidates
+                    memory_candidates.as_ref().map_or(true, |candidates| {
+                        m.frame_ids.iter().any(|fid| candidates.contains(fid))
+                    })
+                })
                 .take(*limit)
                 .map(|m| HybridSearchHit {
                     frame_id: m.frame_ids.first().copied().unwrap_or(0),
@@ -368,7 +389,9 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
                     matched_entity: Some(m.entity),
                     preview: None,
                 })
-                .collect())
+                .collect();
+
+            Ok(filtered_results)
         }
 
         QueryPlan::Hybrid {
@@ -381,12 +404,19 @@ pub fn hybrid_search(memvid: &mut Memvid, plan: &QueryPlan) -> Result<Vec<Hybrid
             let graph_matcher = GraphMatcher::new(memvid);
             let graph_results = graph_matcher.execute(graph_filter);
             let entity_map = graph_matcher.get_matched_entities(&graph_results);
-            let candidate_frames = graph_matcher.get_candidate_frames(&graph_results);
+            let mut candidate_frames = graph_matcher.get_candidate_frames(&graph_results);
+
+            // Apply memory filter to candidate frames
+            if let Some(ref memory_cands) = memory_candidates {
+                candidate_frames.retain(|fid| memory_cands.contains(fid));
+            }
 
             if candidate_frames.is_empty() {
-                // No graph matches - fall back to lexical search
+                // No graph matches - fall back to lexical search with memory filters
                 let query = query_text.as_deref().unwrap_or("");
-                let response = memvid.search(basic_search_request(query, *top_k))?;
+                let mut request = basic_search_request(query, *top_k);
+                request.memory_filters = memory_filters.to_vec();
+                let response = memvid.search(request)?;
                 return Ok(search_hits_to_hybrid(&response.hits));
             }
 

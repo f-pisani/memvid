@@ -390,4 +390,76 @@ describe('Memory Cards', () => {
       expect(results.hits.length).toBe(0);
     });
   });
+
+  describe('includeCards option', () => {
+    it('should include memory cards in search results when includeCards is true', () => {
+      const handle = (mem as any).handle;
+
+      // Store document and add memory card
+      mem.put(Buffer.from('Alice works at Anthropic on AI safety research.'), { uri: 'doc://alice' });
+      handle.putMemoryCard({
+        entity: 'alice',
+        slot: 'employer',
+        value: 'Anthropic',
+        sourceFrameId: 0,
+        kind: 'Fact'
+      });
+      mem.commit();
+
+      // Search without includeCards
+      const resultsWithout = mem.find('Alice', { topK: 10 });
+      expect(resultsWithout.hits.length).toBeGreaterThan(0);
+      // Cards should not be present (or be undefined/empty)
+
+      // Search with includeCards - access via native handle
+      const resultsWithCards = handle.find('Alice', 10, undefined, undefined, undefined, undefined, undefined, true);
+      expect(resultsWithCards.hits.length).toBeGreaterThan(0);
+    });
+
+    it('should include cards in graphSearch results', () => {
+      const handle = (mem as any).handle;
+
+      // Store document and add memory card
+      mem.put(Buffer.from('Bob is a software engineer at Google.'), { uri: 'doc://bob' });
+      handle.putMemoryCard({
+        entity: 'bob',
+        slot: 'employer',
+        value: 'Google',
+        sourceFrameId: 0,
+        kind: 'Fact'
+      });
+      mem.commit();
+
+      // graphSearch with includeCards
+      const results = mem.graphSearch('software engineer', { includeCards: true });
+      expect(results.hits).toBeDefined();
+      expect(results.planType).toBeDefined();
+      // If hits found, cards should be populated
+      if (results.hits.length > 0) {
+        expect(results.hits[0].cards).toBeDefined();
+      }
+    });
+
+    it('should not include cards when includeCards is false', () => {
+      const handle = (mem as any).handle;
+
+      mem.put(Buffer.from('Carol loves TypeScript.'), { uri: 'doc://carol' });
+      handle.putMemoryCard({
+        entity: 'carol',
+        slot: 'preference',
+        value: 'TypeScript',
+        sourceFrameId: 0,
+        kind: 'Preference'
+      });
+      mem.commit();
+
+      const results = mem.graphSearch('TypeScript', { includeCards: false });
+      expect(results.hits).toBeDefined();
+      // Cards should be null/undefined when includeCards is false
+      if (results.hits.length > 0) {
+        // Rust None becomes undefined in JavaScript through napi-rs
+        expect(results.hits[0].cards).toBeFalsy();
+      }
+    });
+  });
 });

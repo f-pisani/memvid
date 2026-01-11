@@ -330,6 +330,32 @@ impl Memvid {
         self.memories_track.entities()
     }
 
+    /// Get all memory cards for a specific frame ID.
+    ///
+    /// Used when `includeCards` is true to return memory cards alongside search results.
+    #[must_use]
+    pub fn get_frame_memory_cards(&self, frame_id: u64) -> Vec<&MemoryCard> {
+        self.memories_track
+            .cards()
+            .iter()
+            .filter(|c| c.source_frame_id == frame_id)
+            .collect()
+    }
+
+    /// Get all entities that have a specific slot.
+    /// Useful for pre-filtering search by slot presence.
+    ///
+    /// # Arguments
+    /// * `slot` - The slot/attribute to search for
+    /// * `value` - Optional value to filter by (exact match)
+    ///
+    /// # Returns
+    /// A sorted list of unique entity names that have the specified slot.
+    #[must_use]
+    pub fn get_entities_by_slot(&self, slot: &str, value: Option<&str>) -> Vec<String> {
+        self.memories_track.get_entities_by_slot(slot, value)
+    }
+
     /// Find memory cards matching a filter.
     ///
     /// This is used for query-time filtering of search results based on

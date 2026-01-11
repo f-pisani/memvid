@@ -8,7 +8,9 @@ use crate::types::FrameId;
 use crate::types::{
     FrameId, SearchHitTemporal, SearchHitTemporalAnchor, SearchHitTemporalMention, TemporalMention,
 };
-use crate::types::{SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse};
+use crate::types::{
+    MemoryCardSummary, SearchEngineKind, SearchHit, SearchHitMetadata, SearchParams, SearchResponse,
+};
 #[cfg(feature = "temporal_track")]
 use std::collections::HashMap;
 #[cfg(feature = "temporal_track")]
@@ -415,5 +417,96 @@ pub(super) fn enrich_hits_with_entities(hits: &mut [SearchHit], memvid: &Memvid)
             let metadata = hit.metadata.get_or_insert_with(SearchHitMetadata::default);
             metadata.entities = entities;
         }
+    }
+}
+
+/// Compute memory filter candidates (frame IDs matching any of the memory filters).
+///
+/// Returns `None` if no filters are provided, or `Some(HashSet)` with matching frame IDs.
+/// Multiple filters are OR'd together (any match includes the frame).
+///
+/// This is used at query time for vector, CLIP, and hybrid searches to respect topK.
+pub(crate) fn compute_memory_filter_candidates(
+    memvid: &Memvid,
+    memory_filters: &[crate::types::MemoryFilter],
+) -> Option<StdHashSet<u64>> {
+    if memory_filters.is_empty() {
+        return None;
+    }
+
+    let frame_ids: StdHashSet<u64> = memory_filters
+        .iter()
+        .flat_map(|filter| memvid.find_memory_cards_matching_filter(filter))
+        .map(|card| card.source_frame_id)
+        .collect();
+
+    if frame_ids.is_empty() {
+        // Return empty set to signal no matches (will return empty results)
+        Some(StdHashSet::new())
+    } else {
+        Some(frame_ids)
+    }
+}
+
+/// Attach memory cards to search hits.
+///
+/// For each hit, looks up memory cards where `source_frame_id` matches the hit's `frame_id`.
+/// If the frame is a DocumentChunk (page), also checks the parent document frame
+/// for cards since extraction may happen on the full document.
+///
+/// This avoids N+1 queries when the caller needs both search results and their associated
+/// memory cards.
+pub(crate) fn attach_cards_to_hits(hits: &mut [SearchHit], memvid: &Memvid) {
+    if hits.is_empty() {
+        return;
+    }
+
+    // Build a set of all frame IDs we need cards for (including parent IDs)
+    let mut frame_ids: StdHashSet<u64> = StdHashSet::new();
+    for hit in hits.iter() {
+        frame_ids.insert(hit.frame_id);
+        // Also collect parent IDs for chunks
+        if let Some(frame) = memvid.toc.frames.get(hit.frame_id as usize) {
+            if let Some(parent_id) = frame.parent_id {
+                frame_ids.insert(parent_id);
+            }
+        }
+    }
+
+    // Single pass through all cards to build a map of frame_id -> cards
+    let mut cards_by_frame: BTreeMap<u64, Vec<MemoryCardSummary>> = BTreeMap::new();
+    for card in memvid.memories_track.cards() {
+        if frame_ids.contains(&card.source_frame_id) {
+            cards_by_frame
+                .entry(card.source_frame_id)
+                .or_default()
+                .push(MemoryCardSummary {
+                    entity: card.entity.clone(),
+                    slot: card.slot.clone(),
+                    value: card.value.clone(),
+                    kind: card.kind,
+                });
+        }
+    }
+
+    // Attach cards to each hit
+    for hit in hits.iter_mut() {
+        let mut cards = cards_by_frame
+            .get(&hit.frame_id)
+            .cloned()
+            .unwrap_or_default();
+
+        // If no cards found and this is a chunk, check the parent frame
+        if cards.is_empty() {
+            if let Some(frame) = memvid.toc.frames.get(hit.frame_id as usize) {
+                if let Some(parent_id) = frame.parent_id {
+                    if let Some(parent_cards) = cards_by_frame.get(&parent_id) {
+                        cards = parent_cards.clone();
+                    }
+                }
+            }
+        }
+
+        hit.cards = cards;
     }
 }

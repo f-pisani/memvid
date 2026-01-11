@@ -103,9 +103,7 @@ impl Memvid {
             // Disable sketch pre-filter for ask queries - accuracy is more important than speed
             // SimHash can filter out semantically relevant documents that use different wording
             no_sketch: true,
-            exclude_frame_ids: Vec::new(),
-            exclude_uris: Vec::new(),
-            memory_filters: Vec::new(),
+            ..Default::default()
         };
 
         // Pre-compute the query embedding once so we can reuse it for vector recall and semantic re-rank
@@ -625,6 +623,7 @@ impl Memvid {
                 text: frame_text.clone(),
                 chunk_text: Some(frame_text.clone()),
                 metadata: None,
+                cards: Vec::new(),
             });
         }
 
