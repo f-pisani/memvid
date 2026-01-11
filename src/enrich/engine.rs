@@ -167,7 +167,7 @@ mod tests {
             "mv2://test/msg-1".to_string(),
             "Hello, I work at Anthropic.".to_string(),
             Some("Test".to_string()),
-            1700000000,
+            1_700_000_000,
             None,
         );
         assert_eq!(ctx.frame_id, 42);
