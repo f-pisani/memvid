@@ -28,12 +28,30 @@ pub enum SearchEngineKind {
     Tantivy,
     LexFallback,
     Hybrid,
+    Vec,
 }
 
 impl Default for SearchEngineKind {
     fn default() -> Self {
         Self::LexFallback
     }
+}
+
+/// Summary of a memory card for search results.
+///
+/// This is a lightweight representation of a `MemoryCard`, containing only the
+/// essential fields needed for display in search results. Using this instead
+/// of the full `MemoryCard` avoids exposing internal details and reduces payload size.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCardSummary {
+    /// The entity this memory is about (e.g., "user", "project.memvid").
+    pub entity: String,
+    /// The attribute/slot being described (e.g., "employer", "favorite_food").
+    pub slot: String,
+    /// The actual value.
+    pub value: String,
+    /// What kind of memory this represents.
+    pub kind: MemoryKind,
 }
 
 /// Filter search results based on Memory Card criteria.
@@ -212,6 +230,10 @@ pub struct SearchRequest {
     /// Multiple filters are combined with OR (any match includes the frame).
     /// Applied at query time - only matching frames are searched.
     pub memory_filters: Vec<MemoryFilter>,
+    #[serde(default)]
+    /// Include memory cards in search results.
+    /// When true, each hit will include associated memory cards, avoiding N+1 queries.
+    pub include_cards: bool,
 }
 
 /// A single ranked hit with snippet metadata.
@@ -233,6 +255,9 @@ pub struct SearchHit {
     pub score: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<SearchHitMetadata>,
+    /// Memory cards associated with this frame (populated when include_cards is requested).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cards: Vec<MemoryCardSummary>,
 }
 
 /// Entity reference in search hit metadata.

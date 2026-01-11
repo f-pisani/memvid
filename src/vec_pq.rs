@@ -349,6 +349,20 @@ impl QuantizedVecIndex {
 
     /// Search using asymmetric distance computation
     pub fn search(&self, query: &[f32], limit: usize) -> Vec<VecSearchHit> {
+        self.search_with_filter(query, limit, None)
+    }
+
+    /// Search with optional candidate filter.
+    ///
+    /// When `candidates` is provided, only documents with frame_ids in the set
+    /// are considered. This enables query-time filtering (e.g., by memory cards)
+    /// while respecting topK semantics.
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        limit: usize,
+        candidates: Option<&std::collections::HashSet<crate::types::FrameId>>,
+    ) -> Vec<VecSearchHit> {
         if query.is_empty() {
             return Vec::new();
         }
@@ -356,6 +370,11 @@ impl QuantizedVecIndex {
         let mut hits: Vec<VecSearchHit> = self
             .documents
             .iter()
+            .filter(|doc| {
+                candidates
+                    .map(|c| c.contains(&doc.frame_id))
+                    .unwrap_or(true)
+            })
             .map(|doc| {
                 let distance = self.quantizer.asymmetric_distance(query, &doc.codes);
                 VecSearchHit {

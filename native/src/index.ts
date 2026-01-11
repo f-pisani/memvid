@@ -45,6 +45,11 @@ import type {
   PutManyItemResult,
   MemoryFilter,
   ClipSearchHit,
+  ClipSearchOptions,
+  HybridSearchOptions,
+  GraphSearchOptions,
+  GraphSearchHit,
+  GraphSearchResult,
   EnrichmentStats,
   EnrichmentTask,
   ProcessBatchResult,
@@ -102,6 +107,7 @@ interface ParsedSearchOptions {
   excludeIds: number[] | undefined;
   excludeUris: string[] | undefined;
   memoryFilters: MemoryFilter[] | undefined;
+  includeCards: boolean | undefined;
 }
 
 function parseSearchOptions(options?: SearchOptions | number): ParsedSearchOptions {
@@ -113,6 +119,7 @@ function parseSearchOptions(options?: SearchOptions | number): ParsedSearchOptio
       excludeIds: undefined,
       excludeUris: undefined,
       memoryFilters: undefined,
+      includeCards: undefined,
     };
   }
   if (options) {
@@ -123,6 +130,7 @@ function parseSearchOptions(options?: SearchOptions | number): ParsedSearchOptio
       excludeIds: options.excludeFrameIds,
       excludeUris: options.excludeUris,
       memoryFilters: options.memoryFilters,
+      includeCards: options.includeCards,
     };
   }
   return {
@@ -132,6 +140,7 @@ function parseSearchOptions(options?: SearchOptions | number): ParsedSearchOptio
     excludeIds: undefined,
     excludeUris: undefined,
     memoryFilters: undefined,
+    includeCards: undefined,
   };
 }
 
@@ -448,10 +457,10 @@ export class Memvid {
       throw new MemvidError('INVALID_INPUT', 'query must be a string');
     }
 
-    const { limit, uri, scope, excludeIds, excludeUris, memoryFilters } = parseSearchOptions(options);
+    const { limit, uri, scope, excludeIds, excludeUris, memoryFilters, includeCards } = parseSearchOptions(options);
 
     try {
-      return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris, memoryFilters) as SearchResult;
+      return this.handle.find(query, limit, uri, scope, excludeIds, excludeUris, memoryFilters, includeCards) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -513,10 +522,20 @@ export class Memvid {
    */
   vecSearch(queryEmbedding: number[], options?: SearchOptions | number): SearchResult {
     const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
-    const { limit, uri, scope, excludeIds, excludeUris } = parseSearchOptions(options);
+    const { limit, uri, scope, excludeIds, excludeUris, memoryFilters, includeCards } =
+      parseSearchOptions(options);
 
     try {
-      return this.handle.vecSearch(validEmbedding, limit, uri, scope, excludeIds, excludeUris) as SearchResult;
+      return this.handle.vecSearch(
+        validEmbedding,
+        limit,
+        uri,
+        scope,
+        excludeIds,
+        excludeUris,
+        memoryFilters,
+        includeCards,
+      ) as SearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -654,28 +673,113 @@ export class Memvid {
    * Returns hits sorted by distance (lower is more similar).
    *
    * @param queryEmbedding - The query embedding (from CLIP text or image encoder)
-   * @param topK - Maximum number of results to return (default: 10)
+   * @param options - Search options (topK, memoryFilters) or just a number for topK
    * @returns Array of CLIP search hits with frame IDs, optional page numbers, and distances
    *
    * @example
    * ```typescript
    * // Search by text description
    * const textEmbedding = await clipModel.encodeText('a photo of a sunset');
-   * const hits = mem.clipSearch(textEmbedding, 5);
+   * const hits = mem.clipSearch(textEmbedding, { topK: 5 });
    *
    * for (const hit of hits) {
    *   console.log(`Frame ${hit.frameId}${hit.page ? ` page ${hit.page}` : ''}: distance ${hit.distance}`);
    * }
    *
-   * // Search by image similarity
-   * const imageEmbedding = await clipModel.encodeImage(queryImageBuffer);
+   * // Search with memory filters
+   * const hits = mem.clipSearch(textEmbedding, {
+   *   topK: 10,
+   *   memoryFilters: [{ slot: 'cat:verification' }]
+   * });
+   *
+   * // Legacy: pass just a number for topK
    * const similar = mem.clipSearch(imageEmbedding, 10);
    * ```
    */
-  clipSearch(queryEmbedding: number[], topK?: number): ClipSearchHit[] {
+  clipSearch(queryEmbedding: number[], options?: ClipSearchOptions | number): ClipSearchHit[] {
     const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
+
+    // Parse options - support legacy number for backwards compatibility
+    const parsedOptions: ClipSearchOptions =
+      typeof options === 'number'
+        ? { topK: options }
+        : options || {};
+
     try {
-      return this.handle.clipSearch(validEmbedding, topK) as ClipSearchHit[];
+      return this.handle.clipSearch(validEmbedding, parsedOptions) as ClipSearchHit[];
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Hybrid search using both text query and vector embedding.
+   *
+   * Performs vector similarity search using the pre-computed embedding.
+   * The query string is used for snippet generation and ranking.
+   * Requires vec index to be enabled.
+   *
+   * @param query - Text query for lexical matching and snippet generation
+   * @param queryEmbedding - Pre-computed embedding vector (384-1536 dimensions)
+   * @param options - Search options including topK, memoryFilters, includeCards
+   * @returns Search results with hits
+   *
+   * @example
+   * ```typescript
+   * const embedding = await embedder.embedQuery('machine learning');
+   * const results = mem.hybridSearch('machine learning', embedding, {
+   *   topK: 10,
+   *   memoryFilters: [{ slot: 'category', valueContains: 'tech' }],
+   *   includeCards: true
+   * });
+   * ```
+   */
+  hybridSearch(
+    query: string,
+    queryEmbedding: number[],
+    options?: HybridSearchOptions & { topK?: number }
+  ): SearchResult {
+    const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
+    const topK = options?.topK ?? 10;
+
+    try {
+      return this.handle.hybridSearch(query, validEmbedding, topK, options) as SearchResult;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Graph search combining memory cards with vector/lexical search.
+   *
+   * Uses QueryPlanner to analyze the query and determine the best execution strategy:
+   * - For simple queries: vector-only search (falls back to lexical)
+   * - For queries referencing entities: hybrid search combining memory cards and lexical search
+   *
+   * @param query - Natural language query (can include entity references)
+   * @param options - Search options including topK, memoryFilters, includeCards
+   * @returns Graph search results with hits and execution plan info
+   *
+   * @example
+   * ```typescript
+   * // Simple query
+   * const results = mem.graphSearch('machine learning algorithms');
+   *
+   * // Query with entity reference (triggers graph matching)
+   * const results = mem.graphSearch('where does Alice work?', {
+   *   topK: 5,
+   *   includeCards: true
+   * });
+   *
+   * // With memory filters
+   * const results = mem.graphSearch('projects', {
+   *   memoryFilters: [{ entity: 'user' }]
+   * });
+   * ```
+   */
+  graphSearch(query: string, options?: GraphSearchOptions): GraphSearchResult {
+    try {
+      return this.handle.graphSearch(query, options) as GraphSearchResult;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -1100,6 +1204,34 @@ export class Memvid {
   markFrameEnriched(frameId: number): void {
     try {
       this.handle.markFrameEnriched(frameId);
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Get all entities that have a specific slot
+   *
+   * Useful for pre-filtering search by slot presence.
+   * Returns a sorted list of unique entity names.
+   *
+   * @param slot - The slot/attribute to search for
+   * @param value - Optional value to filter by (exact match)
+   * @returns Array of entity names that have the specified slot
+   *
+   * @example
+   * ```typescript
+   * // Get all entities with a 'verification' slot
+   * const entities = mem.getEntitiesBySlot('cat:verification');
+   * // Returns: ['thread:123', 'thread:456', ...]
+   *
+   * // Get entities with a specific slot value
+   * const learnable = mem.getEntitiesBySlot('learnable', '1');
+   * ```
+   */
+  getEntitiesBySlot(slot: string, value?: string): string[] {
+    try {
+      return this.handle.getEntitiesBySlot(slot, value) as string[];
     } catch (error) {
       throw parseNapiError(error as Error);
     }

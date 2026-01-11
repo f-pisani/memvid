@@ -58,8 +58,8 @@ pub use metadata::{
 };
 pub use options::{PutManyOpts, PutOptions, PutOptionsBuilder, PutRequest};
 pub use search::{
-    MemoryFilter, SearchEngineKind, SearchHit, SearchHitEntity, SearchHitMetadata, SearchParams,
-    SearchRequest, SearchResponse,
+    MemoryCardSummary, MemoryFilter, SearchEngineKind, SearchHit, SearchHitEntity,
+    SearchHitMetadata, SearchParams, SearchRequest, SearchResponse,
 };
 #[cfg(feature = "temporal_track")]
 pub use search::{SearchHitTemporal, SearchHitTemporalAnchor, SearchHitTemporalMention};

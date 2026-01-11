@@ -182,6 +182,7 @@ pub(super) fn search_with_lex_fallback(
                 chunk_text: Some(chunk_text),
                 score: Some(matched.score),
                 metadata: Some(metadata),
+                cards: Vec::new(),
             });
             produced += 1;
         }
@@ -320,6 +321,7 @@ pub(super) fn search_with_filters_only(
             chunk_text: Some(snippet),
             score: None,
             metadata: Some(metadata),
+            cards: Vec::new(),
         });
         produced += 1;
     }

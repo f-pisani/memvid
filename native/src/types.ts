@@ -70,6 +70,8 @@ export interface SearchHit {
   title?: string;
   /** Frame URI */
   uri?: string;
+  /** Memory cards associated with this frame (when includeCards is true) */
+  cards?: MemoryCardSummary[];
 }
 
 /** Search response */
@@ -156,6 +158,11 @@ export interface SearchOptions {
    * Applied at query-time BEFORE search ranking for efficient filtering.
    */
   memoryFilters?: MemoryFilter[];
+  /**
+   * Include memory cards in search results (avoids N+1 queries).
+   * When true, each hit will include associated memory cards.
+   */
+  includeCards?: boolean;
 }
 
 /** Statistics about a memvid file */
@@ -262,6 +269,18 @@ export interface PutManyResult {
   frameIds: number[];
 }
 
+/** Summary of a memory card (returned with includeCards) */
+export interface MemoryCardSummary {
+  /** The entity this memory is about */
+  entity: string;
+  /** The attribute/slot being described */
+  slot: string;
+  /** The actual value */
+  value: string;
+  /** Memory kind: "Fact", "Preference", "Event", etc. */
+  kind: string;
+}
+
 /** A single CLIP visual search hit */
 export interface ClipSearchHit {
   /** Frame ID */
@@ -270,6 +289,99 @@ export interface ClipSearchHit {
   page?: number;
   /** L2 distance to query (lower is more similar) */
   distance: number;
+  /** Memory cards associated with this frame (when includeCards is true) */
+  cards?: MemoryCardSummary[];
+}
+
+/** Options for CLIP search */
+export interface ClipSearchOptions {
+  /** Maximum number of results to return (default: 10) */
+  topK?: number;
+  /**
+   * Filter by Memory Cards - only return frames that have matching memory cards.
+   * Multiple filters are ORed together.
+   * Applied at query-time BEFORE search ranking for efficient filtering.
+   */
+  memoryFilters?: MemoryFilter[];
+  /**
+   * Include memory cards in search results (avoids N+1 queries).
+   * When true, each hit will include associated memory cards.
+   */
+  includeCards?: boolean;
+}
+
+/** Options for hybrid search (vector + text) */
+export interface HybridSearchOptions {
+  /** Maximum characters for snippets (default: 200) */
+  snippetChars?: number;
+  /** URI scope filter (prefix match) */
+  scope?: string;
+  /**
+   * Filter by Memory Cards - only return frames that have matching memory cards.
+   * Multiple filters are ORed together.
+   * Applied at query-time BEFORE search ranking for efficient filtering.
+   */
+  memoryFilters?: MemoryFilter[];
+  /**
+   * Include memory cards in search results (avoids N+1 queries).
+   * When true, each hit will include associated memory cards.
+   */
+  includeCards?: boolean;
+}
+
+/** Options for graph search */
+export interface GraphSearchOptions {
+  /** Maximum number of results to return (default: 10) */
+  topK?: number;
+  /** URI scope filter (prefix match) */
+  scope?: string;
+  /**
+   * Filter by Memory Cards - only return frames that have matching memory cards.
+   * Multiple filters are ORed together.
+   * Applied at query-time BEFORE search ranking for efficient filtering.
+   */
+  memoryFilters?: MemoryFilter[];
+  /**
+   * Include memory cards in search results (avoids N+1 queries).
+   * When true, each hit will include associated memory cards.
+   */
+  includeCards?: boolean;
+}
+
+// ============================================================================
+// Graph Search Types
+// ============================================================================
+
+/** A single graph search hit */
+export interface GraphSearchHit {
+  /** Frame ID */
+  frameId: number;
+  /** Combined relevance score (graph + vector) */
+  score: number;
+  /** Graph pattern match score (0.0-1.0) */
+  graphScore: number;
+  /** Vector/lexical similarity score */
+  vectorScore: number;
+  /** Entity that matched the graph pattern (if any) */
+  matchedEntity?: string;
+  /** Frame content preview */
+  preview?: string;
+  /** Memory cards associated with this frame (when includeCards is true) */
+  cards?: MemoryCardSummary[];
+}
+
+/** Result of graph search including execution plan info */
+export interface GraphSearchResult {
+  /** Search hits */
+  hits: GraphSearchHit[];
+  /** Execution plan used: "vector_only", "graph_only", or "hybrid" */
+  planType: string;
+  /** Whether the plan used graph patterns */
+  usesGraph: boolean;
+  /** Whether the plan used vector/lexical search */
+  usesVector: boolean;
+  /** Total number of hits */
+  totalHits: number;
 }
 
 // ============================================================================

@@ -266,6 +266,11 @@ impl Memvid {
             helpers::enrich_hits_with_entities(&mut response.hits, self);
         }
 
+        // Attach memory cards to hits if requested (avoids N+1 queries)
+        if request.include_cards {
+            helpers::attach_cards_to_hits(&mut response.hits, self);
+        }
+
         // Note: exclude_frame_ids and exclude_uris are now applied at query time
         // in Tantivy (via MustNot clauses) and in fallback search (via early filtering)
 

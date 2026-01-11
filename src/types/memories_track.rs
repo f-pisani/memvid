@@ -489,6 +489,45 @@ impl MemoriesTrack {
         self.slot_index.slots_for_entity(entity)
     }
 
+    /// Get all unique entities that have a specific slot.
+    /// Optionally filter by value (exact match).
+    #[must_use]
+    pub fn get_entities_by_slot(&self, slot: &str, value: Option<&str>) -> Vec<String> {
+        let slot_lower = slot.to_lowercase();
+        let mut entities: Vec<String> = self
+            .slot_index
+            .entries
+            .iter()
+            .filter_map(|(key, card_ids)| {
+                // Parse the key to get entity and slot parts
+                if let Some((entity, key_slot)) = parse_slot_key(key) {
+                    // Check if slot matches (case-insensitive)
+                    if key_slot.to_lowercase() == slot_lower {
+                        // If value filter is provided, check if any card matches
+                        if let Some(val) = value {
+                            let has_matching_value = card_ids.iter().any(|id| {
+                                self.cards
+                                    .iter()
+                                    .find(|c| c.id == *id)
+                                    .map(|c| c.value == val)
+                                    .unwrap_or(false)
+                            });
+                            if has_matching_value {
+                                return Some(entity.to_string());
+                            }
+                        } else {
+                            return Some(entity.to_string());
+                        }
+                    }
+                }
+                None
+            })
+            .collect();
+        entities.sort();
+        entities.dedup();
+        entities
+    }
+
     /// Serialize the track for storage using JSON.
     /// We use JSON for complex nested structures to ensure compatibility.
     pub fn serialize(&self) -> Result<Vec<u8>> {
@@ -831,5 +870,82 @@ mod tests {
         assert_eq!(timeline[0].value, "started job");
         assert_eq!(timeline[1].value, "moved to SF");
         assert_eq!(timeline[2].value, "got promoted");
+    }
+
+    #[test]
+    fn test_get_entities_by_slot() {
+        let mut track = MemoriesTrack::new();
+
+        // Add cards for multiple entities with the same slot
+        let card1 = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("employer")
+            .value("Anthropic")
+            .source(1, None)
+            .engine("rules-v1", "1.0.0")
+            .build(0)
+            .unwrap();
+        track.add_card(card1);
+
+        let card2 = MemoryCardBuilder::new()
+            .fact()
+            .entity("bob")
+            .slot("employer")
+            .value("OpenAI")
+            .source(2, None)
+            .engine("rules-v1", "1.0.0")
+            .build(0)
+            .unwrap();
+        track.add_card(card2);
+
+        let card3 = MemoryCardBuilder::new()
+            .fact()
+            .entity("charlie")
+            .slot("employer")
+            .value("Anthropic")
+            .source(3, None)
+            .engine("rules-v1", "1.0.0")
+            .build(0)
+            .unwrap();
+        track.add_card(card3);
+
+        let card4 = MemoryCardBuilder::new()
+            .fact()
+            .entity("alice")
+            .slot("location")
+            .value("San Francisco")
+            .source(4, None)
+            .engine("rules-v1", "1.0.0")
+            .build(0)
+            .unwrap();
+        track.add_card(card4);
+
+        // Get all entities with "employer" slot
+        let entities = track.get_entities_by_slot("employer", None);
+        assert_eq!(entities.len(), 3);
+        assert!(entities.contains(&"alice".to_string()));
+        assert!(entities.contains(&"bob".to_string()));
+        assert!(entities.contains(&"charlie".to_string()));
+
+        // Get entities with "employer" slot and value "Anthropic"
+        let entities = track.get_entities_by_slot("employer", Some("Anthropic"));
+        assert_eq!(entities.len(), 2);
+        assert!(entities.contains(&"alice".to_string()));
+        assert!(entities.contains(&"charlie".to_string()));
+        assert!(!entities.contains(&"bob".to_string()));
+
+        // Get entities with "location" slot
+        let entities = track.get_entities_by_slot("location", None);
+        assert_eq!(entities.len(), 1);
+        assert!(entities.contains(&"alice".to_string()));
+
+        // Non-existent slot returns empty
+        let entities = track.get_entities_by_slot("hobby", None);
+        assert!(entities.is_empty());
+
+        // Case-insensitive slot matching
+        let entities = track.get_entities_by_slot("EMPLOYER", None);
+        assert_eq!(entities.len(), 3);
     }
 }

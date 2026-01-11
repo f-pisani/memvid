@@ -287,6 +287,20 @@ impl ClipIndex {
 
     /// Search for similar embeddings using L2 distance
     pub fn search(&self, query: &[f32], limit: usize) -> Vec<ClipSearchHit> {
+        self.search_with_filter(query, limit, None)
+    }
+
+    /// Search with optional candidate filter.
+    ///
+    /// When `candidates` is provided, only documents with frame_ids in the set
+    /// are considered. This enables query-time filtering (e.g., by memory cards)
+    /// while respecting topK semantics.
+    pub fn search_with_filter(
+        &self,
+        query: &[f32],
+        limit: usize,
+        candidates: Option<&std::collections::HashSet<FrameId>>,
+    ) -> Vec<ClipSearchHit> {
         if query.is_empty() {
             return Vec::new();
         }
@@ -294,6 +308,11 @@ impl ClipIndex {
         let mut hits: Vec<ClipSearchHit> = self
             .documents
             .iter()
+            .filter(|doc| {
+                candidates
+                    .map(|c| c.contains(&doc.frame_id))
+                    .unwrap_or(true)
+            })
             .map(|doc| {
                 let distance = l2_distance(query, &doc.embedding);
                 ClipSearchHit {
@@ -1585,6 +1604,48 @@ mod tests {
         // Search for [0, 1, 0] - should find frame 2 first
         let hits = index.search(&[0.0, 1.0, 0.0], 3);
         assert_eq!(hits[0].frame_id, 2);
+    }
+
+    #[test]
+    fn clip_index_search_with_filter() {
+        use std::collections::HashSet;
+
+        let mut builder = ClipIndexBuilder::new();
+        builder.add_document(1, None, vec![1.0, 0.0, 0.0]);
+        builder.add_document(2, None, vec![0.0, 1.0, 0.0]);
+        builder.add_document(3, None, vec![0.0, 0.0, 1.0]);
+        builder.add_document(4, None, vec![0.9, 0.1, 0.0]); // Very close to frame 1
+
+        let artifact = builder.finish().expect("finish");
+        let index = ClipIndex::decode(&artifact.bytes).expect("decode");
+
+        // Without filter: frame 1 should be closest to [1, 0, 0]
+        let hits = index.search(&[1.0, 0.0, 0.0], 3);
+        assert_eq!(hits[0].frame_id, 1);
+
+        // With filter excluding frame 1: frame 4 should be closest (next best match)
+        let mut candidates: HashSet<FrameId> = HashSet::new();
+        candidates.insert(2);
+        candidates.insert(3);
+        candidates.insert(4);
+        let hits = index.search_with_filter(&[1.0, 0.0, 0.0], 3, Some(&candidates));
+        assert_eq!(hits[0].frame_id, 4); // Frame 4 is closest among candidates
+
+        // With filter including only frame 2 and 3: frame 2 should be equidistant with 3
+        let mut candidates: HashSet<FrameId> = HashSet::new();
+        candidates.insert(2);
+        candidates.insert(3);
+        let hits = index.search_with_filter(&[1.0, 0.0, 0.0], 3, Some(&candidates));
+        assert!(hits[0].frame_id == 2 || hits[0].frame_id == 3);
+        assert_eq!(hits.len(), 2); // Only 2 candidates match
+
+        // With None filter: same as regular search
+        let hits_none = index.search_with_filter(&[1.0, 0.0, 0.0], 3, None);
+        assert_eq!(hits_none[0].frame_id, 1);
+
+        // Empty query returns empty results
+        let hits = index.search_with_filter(&[], 3, Some(&candidates));
+        assert!(hits.is_empty());
     }
 
     #[test]
