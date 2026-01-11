@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn structural_chunking_keeps_small_table_whole() {
-        let text = r#"# Small Report
+        let text = r"# Small Report
 
 Introduction paragraph.
 
@@ -307,7 +307,7 @@ Introduction paragraph.
 | Orange | $2 |
 
 Conclusion.
-"#
+"
         .repeat(50); // Repeat to meet minimum size
 
         let plan = plan_document_chunks(text.as_bytes()).expect("chunk plan");
@@ -327,7 +327,7 @@ Conclusion.
 
     #[test]
     fn structural_chunking_detects_code_blocks() {
-        let text = r#"# Code Example
+        let text = r"# Code Example
 
 Here is some code:
 
@@ -347,7 +347,7 @@ class DataProcessor:
         self.data.append(item)
 ```
 
-More explanation here. "#
+More explanation here. "
             .repeat(20);
 
         let plan = plan_document_chunks(text.as_bytes()).expect("chunk plan");

@@ -44,8 +44,17 @@ import type {
   PutManyResult,
   PutManyItemResult,
   MemoryFilter,
+  ClipSearchHit,
+  EnrichmentStats,
+  EnrichmentTask,
+  ProcessBatchResult,
+  VacuumResult,
+  CompactWalResult,
+  ChunkEmbedding,
+  AskRequest,
+  AskResponse,
 } from './types';
-import { parseNapiError, VecDimensionMismatchError, MemvidError } from './error';
+import { parseNapiError, MemvidError } from './error';
 
 // ============================================================================
 // Input Validation
@@ -261,7 +270,7 @@ export class Memvid {
   put(content: Buffer, options?: PutOptions): number {
     const validContent = validateContent(content);
     try {
-      return this.handle.put(validContent, options ?? undefined) as number;
+      return this.handle.put(validContent, options) as number;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -292,7 +301,7 @@ export class Memvid {
     const validContent = validateContent(content);
     const validEmbedding = validateEmbedding(embedding, 'embedding');
     try {
-      return this.handle.putWithEmbedding(validContent, validEmbedding, options ?? undefined) as number;
+      return this.handle.putWithEmbedding(validContent, validEmbedding, options) as number;
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -449,6 +458,38 @@ export class Memvid {
   }
 
   /**
+   * Ask a question using RAG (Retrieval-Augmented Generation)
+   *
+   * Retrieves relevant context from the memory and optionally generates an answer.
+   * By default, only retrieves context (context_only: true) for use with your own LLM.
+   *
+   * @param request - Ask request options
+   * @returns Ask response with context and optional answer
+   *
+   * @example
+   * ```typescript
+   * // Get context for your own LLM
+   * const result = mem.ask({
+   *   question: 'What is the project about?',
+   *   topK: 5
+   * });
+   * console.log('Context:', result.context);
+   *
+   * // Use context with your LLM
+   * const answer = await myLLM.complete({
+   *   prompt: `Given this context:\n${result.context.map(c => c.text).join('\n')}\n\nQuestion: ${result.question}`
+   * });
+   * ```
+   */
+  ask(request: AskRequest): AskResponse {
+    try {
+      return this.handle.ask(request) as AskResponse;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
    * Search for documents using vector similarity
    *
    * @param queryEmbedding - Query embedding vector
@@ -508,6 +549,138 @@ export class Memvid {
     }
   }
 
+  // ==========================================================================
+  // CLIP Visual Search
+  // ==========================================================================
+
+  /**
+   * Enable CLIP visual embeddings index.
+   *
+   * CLIP allows semantic search across images using natural language queries.
+   * Unlike text vec embeddings (384/768/1536 dims), CLIP embeddings have
+   * fixed 512 dimensions (MobileCLIP-S2) and are stored in a separate index.
+   *
+   * Must be called before using addClipEmbedding() or clipSearch().
+   *
+   * @example
+   * ```typescript
+   * const mem = create('/tmp/visual.mv2');
+   * mem.enableClip();
+   *
+   * // Add image with CLIP embedding
+   * const frameId = mem.put(imageBuffer, { title: 'Cat photo' });
+   * mem.addClipEmbedding(frameId, clipEmbedding);
+   * mem.commit();
+   *
+   * // Search by text
+   * const hits = mem.clipSearch(textQueryEmbedding);
+   * ```
+   */
+  enableClip(): void {
+    try {
+      this.handle.enableClip();
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Add a CLIP embedding for a frame.
+   *
+   * This adds the visual embedding to the CLIP index for later semantic search.
+   * The frame must already exist. Generate embeddings using an external CLIP model
+   * (e.g., via Transformers.js, ONNX runtime, or a CLIP API).
+   *
+   * @param frameId - The frame ID to attach the embedding to
+   * @param embedding - The CLIP embedding vector (typically 512 dimensions for MobileCLIP-S2)
+   *
+   * @example
+   * ```typescript
+   * // Store an image
+   * const frameId = mem.put(imageBuffer, { title: 'Beach sunset' });
+   *
+   * // Generate CLIP embedding externally (e.g., with Transformers.js)
+   * const embedding = await clipModel.encode(imageBuffer);
+   *
+   * // Add to CLIP index
+   * mem.addClipEmbedding(frameId, embedding);
+   * ```
+   */
+  addClipEmbedding(frameId: number, embedding: number[]): void {
+    const validEmbedding = validateEmbedding(embedding, 'embedding');
+    try {
+      this.handle.addClipEmbedding(frameId, validEmbedding);
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Add a CLIP embedding for a frame with page number.
+   *
+   * This adds the visual embedding to the CLIP index with page information.
+   * Useful for PDF pages where you want to track the source page.
+   *
+   * @param frameId - The frame ID to attach the embedding to
+   * @param page - The page number (1-indexed)
+   * @param embedding - The CLIP embedding vector
+   *
+   * @example
+   * ```typescript
+   * // Process a PDF document
+   * const pdfFrameId = mem.putDocument(pdfBuffer, 'report.pdf');
+   *
+   * // Generate CLIP embeddings for each page image
+   * for (let page = 1; page <= pageCount; page++) {
+   *   const pageImage = renderPdfPage(pdfBuffer, page);
+   *   const embedding = await clipModel.encode(pageImage);
+   *   mem.addClipEmbeddingWithPage(pdfFrameId, page, embedding);
+   * }
+   * ```
+   */
+  addClipEmbeddingWithPage(frameId: number, page: number, embedding: number[]): void {
+    const validEmbedding = validateEmbedding(embedding, 'embedding');
+    try {
+      this.handle.addClipEmbeddingWithPage(frameId, page, validEmbedding);
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Search CLIP index with a pre-computed query embedding.
+   *
+   * Use an external CLIP model to generate the query embedding from text or image bytes.
+   * Returns hits sorted by distance (lower is more similar).
+   *
+   * @param queryEmbedding - The query embedding (from CLIP text or image encoder)
+   * @param topK - Maximum number of results to return (default: 10)
+   * @returns Array of CLIP search hits with frame IDs, optional page numbers, and distances
+   *
+   * @example
+   * ```typescript
+   * // Search by text description
+   * const textEmbedding = await clipModel.encodeText('a photo of a sunset');
+   * const hits = mem.clipSearch(textEmbedding, 5);
+   *
+   * for (const hit of hits) {
+   *   console.log(`Frame ${hit.frameId}${hit.page ? ` page ${hit.page}` : ''}: distance ${hit.distance}`);
+   * }
+   *
+   * // Search by image similarity
+   * const imageEmbedding = await clipModel.encodeImage(queryImageBuffer);
+   * const similar = mem.clipSearch(imageEmbedding, 10);
+   * ```
+   */
+  clipSearch(queryEmbedding: number[], topK?: number): ClipSearchHit[] {
+    const validEmbedding = validateEmbedding(queryEmbedding, 'queryEmbedding');
+    try {
+      return this.handle.clipSearch(validEmbedding, topK) as ClipSearchHit[];
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
   /**
    * Get timeline entries (chronological view of frames)
    *
@@ -524,7 +697,7 @@ export class Memvid {
    */
   timeline(options?: TimelineOptions): TimelineEntry[] {
     try {
-      return this.handle.timeline(options ?? undefined) as TimelineEntry[];
+      return this.handle.timeline(options) as TimelineEntry[];
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -580,7 +753,353 @@ export class Memvid {
    */
   verify(deep?: boolean): boolean {
     try {
-      return this.handle.verify(deep ?? undefined) as boolean;
+      return this.handle.verify(deep) as boolean;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  // ==========================================================================
+  // Optimization Operations
+  // ==========================================================================
+
+  /**
+   * Vacuum the file to reclaim space from deleted frames
+   *
+   * This operation:
+   * - Commits any pending changes
+   * - Removes deleted frames and their payloads
+   * - Rebuilds indexes with only active frames
+   *
+   * @returns Statistics about the vacuum operation
+   *
+   * @example
+   * ```typescript
+   * // Delete some frames
+   * mem.delete(frameId1);
+   * mem.delete(frameId2);
+   * mem.commit();
+   *
+   * // Reclaim space
+   * const result = mem.vacuum();
+   * console.log(`Reclaimed ${result.bytesReclaimed} bytes`);
+   * console.log(`Retained ${result.framesRetained} active frames`);
+   * ```
+   */
+  vacuum(): VacuumResult {
+    try {
+      return this.handle.vacuum() as VacuumResult;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Compact the write-ahead log
+   *
+   * This operation commits pending changes and compacts the WAL.
+   * In memvid, the WAL is embedded in the file with a fixed size,
+   * so compaction just commits pending changes.
+   *
+   * @returns Statistics about the compaction operation
+   *
+   * @example
+   * ```typescript
+   * // Add some documents
+   * mem.put(Buffer.from('Document 1'));
+   * mem.put(Buffer.from('Document 2'));
+   *
+   * // Compact WAL (commits and clears pending)
+   * const result = mem.compactWal();
+   * console.log(`Pending after: ${result.pendingAfter}`); // 0
+   * ```
+   */
+  compactWal(): CompactWalResult {
+    try {
+      return this.handle.compactWal() as CompactWalResult;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Preview how a document would be chunked without storing it
+   *
+   * Returns null if the document is too small to be chunked (< 2400 chars after normalization).
+   * Use this to generate embeddings for each chunk before calling putWithChunkEmbeddings().
+   *
+   * @param content - Document content as a Buffer
+   * @returns Array of chunk strings, or null if document is too small to chunk
+   *
+   * @example
+   * ```typescript
+   * const chunks = mem.previewChunks(largeDocument);
+   * if (chunks) {
+   *   // Generate embeddings for each chunk
+   *   const chunkEmbeddings = await Promise.all(
+   *     chunks.map(async (text) => ({
+   *       text,
+   *       embedding: await embedder.embedQuery(text),
+   *     }))
+   *   );
+   *   mem.putWithChunkEmbeddings(largeDocument, undefined, chunkEmbeddings);
+   * } else {
+   *   // Document is small, use regular put
+   *   mem.put(largeDocument);
+   * }
+   * ```
+   */
+  previewChunks(content: Buffer): string[] | null {
+    const validContent = validateContent(content);
+    try {
+      return this.handle.previewChunks(validContent) as string[] | null;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Store a document with pre-computed chunk embeddings
+   *
+   * Use this when you generate embeddings externally for each chunk.
+   * Call previewChunks() first to get the chunks, then generate embeddings
+   * for each chunk, then call this method.
+   *
+   * @param content - Document content as a Buffer
+   * @param parentEmbedding - Optional parent document embedding
+   * @param chunkEmbeddings - Array of chunk embeddings (with optional text)
+   * @param options - Optional metadata (title, uri, kind, labels)
+   * @returns The frame ID of the stored document
+   *
+   * @example
+   * ```typescript
+   * const chunks = mem.previewChunks(content);
+   * if (chunks) {
+   *   const chunkEmbeddings = await Promise.all(
+   *     chunks.map(async (text) => ({
+   *       text,
+   *       embedding: await embedder.embedQuery(text),
+   *     }))
+   *   );
+   *   const frameId = mem.putWithChunkEmbeddings(content, undefined, chunkEmbeddings, {
+   *     title: 'Large Document',
+   *   });
+   *   mem.commit();
+   * }
+   * ```
+   */
+  putWithChunkEmbeddings(
+    content: Buffer,
+    parentEmbedding: number[] | undefined,
+    chunkEmbeddings: ChunkEmbedding[],
+    options?: PutOptions
+  ): number {
+    const validContent = validateContent(content);
+
+    // Validate parent embedding if provided
+    if (parentEmbedding !== undefined) {
+      validateEmbedding(parentEmbedding, 'parentEmbedding');
+    }
+
+    // Validate chunk embeddings
+    for (let i = 0; i < chunkEmbeddings.length; i++) {
+      validateEmbedding(chunkEmbeddings[i].embedding, `chunkEmbeddings[${i}].embedding`);
+    }
+
+    try {
+      return this.handle.putWithChunkEmbeddings(
+        validContent,
+        parentEmbedding,
+        chunkEmbeddings,
+        options
+      ) as number;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  // ==========================================================================
+  // Enrichment Pipeline
+  // ==========================================================================
+
+  /**
+   * Get enrichment statistics
+   *
+   * Returns statistics about the enrichment state of frames:
+   * - totalFrames: Total active frames
+   * - enrichedFrames: Frames that have been fully enriched
+   * - pendingFrames: Frames in the enrichment queue
+   * - skimmedFrames: Frames that are searchable but not enriched
+   *
+   * @returns Enrichment statistics
+   *
+   * @example
+   * ```typescript
+   * const stats = mem.enrichmentStats();
+   * console.log(`Enriched: ${stats.enrichedFrames}/${stats.totalFrames}`);
+   * ```
+   */
+  enrichmentStats(): EnrichmentStats {
+    try {
+      const result = this.handle.enrichmentStats();
+      return {
+        totalFrames: result.totalFrames,
+        enrichedFrames: result.enrichedFrames,
+        pendingFrames: result.pendingFrames,
+        skimmedFrames: result.skimmedFrames,
+      };
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Get the enrichment queue
+   *
+   * Returns all pending enrichment tasks.
+   *
+   * @returns Array of enrichment tasks
+   *
+   * @example
+   * ```typescript
+   * const queue = mem.enrichmentQueue();
+   * console.log(`${queue.length} frames pending enrichment`);
+   * ```
+   */
+  enrichmentQueue(): EnrichmentTask[] {
+    try {
+      const tasks = this.handle.enrichmentQueue();
+      return tasks.map((task: any) => ({
+        frameId: task.frameId,
+        createdAt: task.createdAt,
+        chunksDone: task.chunksDone,
+        chunksTotal: task.chunksTotal,
+      }));
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Get the length of the enrichment queue
+   *
+   * @returns Number of pending enrichment tasks
+   *
+   * @example
+   * ```typescript
+   * if (mem.enrichmentQueueLength() > 0) {
+   *   mem.processAllEnrichment();
+   * }
+   * ```
+   */
+  enrichmentQueueLength(): number {
+    try {
+      return this.handle.enrichmentQueueLen() as number;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Check if there are pending enrichment tasks
+   *
+   * @returns true if there are pending tasks, false otherwise
+   *
+   * @example
+   * ```typescript
+   * while (mem.hasPendingEnrichment()) {
+   *   mem.processEnrichmentBatch(10);
+   * }
+   * ```
+   */
+  hasPendingEnrichment(): boolean {
+    try {
+      return this.handle.hasPendingEnrichment() as boolean;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Process all pending enrichment tasks
+   *
+   * Processes all frames in the enrichment queue:
+   * - Re-extracts full text for skim frames
+   * - Updates search indexes with enriched content
+   * - Marks frames as enriched when complete
+   *
+   * @returns Number of tasks processed
+   *
+   * @example
+   * ```typescript
+   * const count = mem.processAllEnrichment();
+   * console.log(`Processed ${count} enrichment tasks`);
+   * ```
+   */
+  processAllEnrichment(): number {
+    try {
+      return this.handle.processAllEnrichment() as number;
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Process a batch of enrichment tasks
+   *
+   * Processes up to batchSize tasks from the enrichment queue.
+   *
+   * @param batchSize - Maximum number of tasks to process
+   * @returns Result with details about what was processed
+   *
+   * @example
+   * ```typescript
+   * const result = mem.processEnrichmentBatch(10);
+   * console.log(`Processed ${result.tasksProcessed} tasks`);
+   * if (result.errors.length > 0) {
+   *   console.error('Errors:', result.errors);
+   * }
+   * ```
+   */
+  processEnrichmentBatch(batchSize: number): ProcessBatchResult {
+    // Validate batchSize
+    if (!Number.isInteger(batchSize)) {
+      throw new MemvidError('INVALID_INPUT', 'batchSize must be an integer');
+    }
+    if (batchSize < 0) {
+      throw new MemvidError('INVALID_INPUT', 'batchSize must be non-negative');
+    }
+
+    try {
+      const result = this.handle.processEnrichmentBatch(batchSize);
+      return {
+        tasksProcessed: result.tasksProcessed,
+        tasksSucceeded: result.tasksSucceeded,
+        tasksFailed: result.tasksFailed,
+        enrichedFrameIds: result.enrichedFrameIds,
+        errors: result.errors,
+      };
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Mark a specific frame as enriched
+   *
+   * Updates the frame's enrichment state to indicate it has been fully processed.
+   * This is useful for manual enrichment workflows.
+   *
+   * @param frameId - The frame ID to mark as enriched
+   *
+   * @example
+   * ```typescript
+   * mem.markFrameEnriched(frameId);
+   * ```
+   */
+  markFrameEnriched(frameId: number): void {
+    try {
+      this.handle.markFrameEnriched(frameId);
     } catch (error) {
       throw parseNapiError(error as Error);
     }
@@ -748,4 +1267,170 @@ export function maskPii(text: string): string {
  */
 export function containsPii(text: string): boolean {
   return native.containsPii(text);
+}
+
+// ============================================================================
+// Whisper Audio Transcription
+// ============================================================================
+
+import type { TranscriptionResult, WhisperOptions } from './types';
+
+/**
+ * Handle to a Whisper transcriber model.
+ *
+ * Use this when you need to transcribe multiple audio files efficiently.
+ * The model is loaded once and reused for all transcriptions.
+ *
+ * Note: Whisper features require the "whisper" feature flag to be enabled
+ * when building the native module. Without it, these functions will throw.
+ *
+ * @example
+ * ```typescript
+ * const whisper = createWhisper();
+ * const result1 = whisper.transcribe('./audio1.mp3');
+ * const result2 = whisper.transcribe('./audio2.wav');
+ * console.log(result1.text);
+ * ```
+ */
+export interface WhisperHandle {
+  /**
+   * Transcribe an audio file.
+   *
+   * Supports MP3, WAV, FLAC, OGG, and other common audio formats.
+   * Audio is automatically resampled to 16kHz mono.
+   *
+   * @param path - Path to the audio file
+   * @returns Transcription result with text, segments, and duration
+   */
+  transcribe(path: string): TranscriptionResult;
+
+  /**
+   * Transcribe audio from a buffer.
+   *
+   * The buffer should contain audio data in a supported format
+   * (MP3, WAV, FLAC, OGG, etc.). Audio is automatically decoded
+   * and resampled to 16kHz mono.
+   *
+   * @param buffer - Audio data buffer
+   * @returns Transcription result with text, segments, and duration
+   */
+  transcribeBuffer(buffer: Buffer): TranscriptionResult;
+}
+
+/**
+ * Create a new Whisper transcriber.
+ *
+ * Downloads and loads the Whisper model. This may take some time on first run
+ * as the model needs to be downloaded from HuggingFace Hub (~500MB for small models).
+ *
+ * Note: Requires the "whisper" feature flag to be enabled when building.
+ * If not enabled, this function will throw an error.
+ *
+ * @param options - Optional configuration (model name, models directory, offline mode)
+ * @returns A WhisperHandle for transcribing audio
+ *
+ * @example
+ * ```typescript
+ * // Default model (whisper-small-en)
+ * const whisper = createWhisper();
+ *
+ * // Custom model
+ * const whisperMultilang = createWhisper({
+ *   modelName: 'whisper-small',  // Multilingual model
+ *   modelsDir: '/custom/models/path',
+ * });
+ * ```
+ */
+export function createWhisper(options?: WhisperOptions): WhisperHandle {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nativeAny = native as any;
+    if (typeof nativeAny.createWhisper !== 'function') {
+      throw new MemvidError(
+        'WHISPER_NOT_AVAILABLE',
+        'Whisper features are not available. The native module was built without the "whisper" feature flag.'
+      );
+    }
+    return nativeAny.createWhisper(options) as WhisperHandle;
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
+}
+
+/**
+ * Transcribe an audio file directly (one-shot).
+ *
+ * This is a convenience function that creates a Whisper transcriber,
+ * transcribes the audio, and discards the model. For multiple transcriptions,
+ * use `createWhisper()` to reuse the model and avoid repeated loading.
+ *
+ * Note: Requires the "whisper" feature flag to be enabled when building.
+ *
+ * @param path - Path to the audio file (MP3, WAV, FLAC, OGG, etc.)
+ * @param options - Optional Whisper configuration
+ * @returns Transcription result with text, segments, and duration
+ *
+ * @example
+ * ```typescript
+ * const result = transcribeAudio('./meeting.mp3');
+ * console.log('Transcription:', result.text);
+ * console.log('Duration:', result.durationSecs, 'seconds');
+ *
+ * // With timestamps
+ * for (const segment of result.segments) {
+ *   console.log(`[${segment.start}s - ${segment.end}s]: ${segment.text}`);
+ * }
+ * ```
+ */
+export function transcribeAudio(path: string, options?: WhisperOptions): TranscriptionResult {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nativeAny = native as any;
+    if (typeof nativeAny.transcribeAudio !== 'function') {
+      throw new MemvidError(
+        'WHISPER_NOT_AVAILABLE',
+        'Whisper features are not available. The native module was built without the "whisper" feature flag.'
+      );
+    }
+    return nativeAny.transcribeAudio(path, options) as TranscriptionResult;
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
+}
+
+/**
+ * Transcribe audio from a buffer directly (one-shot).
+ *
+ * This is a convenience function that creates a Whisper transcriber,
+ * transcribes the audio buffer, and discards the model.
+ *
+ * Note: Requires the "whisper" feature flag to be enabled when building.
+ *
+ * @param buffer - Audio data buffer (MP3, WAV, FLAC, OGG, etc.)
+ * @param options - Optional Whisper configuration
+ * @returns Transcription result with text, segments, and duration
+ *
+ * @example
+ * ```typescript
+ * import * as fs from 'fs';
+ *
+ * const audioData = fs.readFileSync('./recording.mp3');
+ * const result = transcribeAudioBuffer(audioData);
+ * console.log('Transcription:', result.text);
+ * ```
+ */
+export function transcribeAudioBuffer(buffer: Buffer, options?: WhisperOptions): TranscriptionResult {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nativeAny = native as any;
+    if (typeof nativeAny.transcribeAudioBuffer !== 'function') {
+      throw new MemvidError(
+        'WHISPER_NOT_AVAILABLE',
+        'Whisper features are not available. The native module was built without the "whisper" feature flag.'
+      );
+    }
+    return nativeAny.transcribeAudioBuffer(buffer, options) as TranscriptionResult;
+  } catch (error) {
+    throw parseNapiError(error as Error);
+  }
 }

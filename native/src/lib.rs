@@ -253,6 +253,58 @@ pub struct DoctorResultOutput {
 }
 
 // ============================================================================
+// Vacuum Result
+// ============================================================================
+
+/// Result of a vacuum operation
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VacuumResultOutput {
+    /// Number of bytes reclaimed by vacuum
+    pub bytes_reclaimed: i64,
+    /// Number of active frames retained after vacuum
+    pub frames_retained: i64,
+    /// File size before vacuum (bytes)
+    pub size_before: i64,
+    /// File size after vacuum (bytes)
+    pub size_after: i64,
+}
+
+// ============================================================================
+// Compact WAL Result
+// ============================================================================
+
+/// Result of a WAL compaction operation
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CompactWalResultOutput {
+    /// Number of WAL records compacted
+    pub records_compacted: i64,
+    /// WAL size before compaction (bytes)
+    pub wal_size_before: i64,
+    /// WAL size after compaction (bytes)
+    pub wal_size_after: i64,
+    /// Number of pending records before compaction
+    pub pending_before: i64,
+    /// Number of pending records after compaction (should be 0)
+    pub pending_after: i64,
+}
+
+// ============================================================================
+// Chunk Embedding Input
+// ============================================================================
+
+/// A chunk embedding for document ingestion
+#[napi(object)]
+#[derive(Debug, Clone)]
+pub struct ChunkEmbeddingInput {
+    /// Optional text content of the chunk
+    pub text: Option<String>,
+    /// Embedding vector for the chunk
+    pub embedding: Vec<f64>,
+}
+
+// ============================================================================
 // Put Options
 // ============================================================================
 
@@ -367,6 +419,18 @@ pub struct SearchResult {
     pub engine: String,
     /// Cursor for pagination
     pub cursor: Option<String>,
+}
+
+/// A single CLIP visual search hit
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClipSearchHitResult {
+    /// Frame ID
+    pub frame_id: i64,
+    /// Page number (1-indexed, for PDFs) - None if not a paged document
+    pub page: Option<i32>,
+    /// L2 distance to query (lower is more similar)
+    pub distance: f64,
 }
 
 /// Memory filter for restricting search to frames with matching Memory Cards.
@@ -682,6 +746,36 @@ pub struct EnrichmentStatsResult {
     pub pending_frames: i64,
     /// Frames that are searchable but not enriched (skimmed)
     pub skimmed_frames: i64,
+}
+
+/// An enrichment task in the queue
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnrichmentTaskResult {
+    /// Frame ID to enrich
+    pub frame_id: i64,
+    /// Timestamp when task was created (Unix epoch seconds)
+    pub created_at: i64,
+    /// Number of chunks already processed
+    pub chunks_done: i64,
+    /// Total chunks to process
+    pub chunks_total: i64,
+}
+
+/// Result of processing an enrichment batch
+#[napi(object)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessBatchResult {
+    /// Number of tasks processed
+    pub tasks_processed: i64,
+    /// Number of tasks that succeeded
+    pub tasks_succeeded: i64,
+    /// Number of tasks that failed
+    pub tasks_failed: i64,
+    /// Frame IDs that were enriched
+    pub enriched_frame_ids: Vec<i64>,
+    /// Errors encountered (if any)
+    pub errors: Vec<String>,
 }
 
 // ============================================================================
@@ -1161,6 +1255,110 @@ impl MemvidHandle {
                 engine: "Vec".to_string(),
                 cursor: None,
             })
+        })
+    }
+
+    // ========================================================================
+    // CLIP Visual Search Methods
+    // ========================================================================
+
+    /// Enable CLIP visual embeddings index
+    ///
+    /// CLIP allows semantic search across images using natural language queries.
+    /// Unlike text vec embeddings (384/768/1536 dims), CLIP embeddings have
+    /// fixed 512 dimensions (MobileCLIP-S2) and are stored in a separate index.
+    #[napi]
+    pub fn enable_clip(&self) -> napi::Result<()> {
+        self.with_memvid(|memvid| {
+            memvid.enable_clip().map_err(memvid_to_napi_error)?;
+            Ok(())
+        })
+    }
+
+    /// Add a CLIP embedding for a frame
+    ///
+    /// This adds the visual embedding to the CLIP index for later semantic search.
+    /// The frame must already exist. Use an external CLIP model to generate embeddings.
+    #[napi]
+    pub fn add_clip_embedding(&self, frame_id: i64, embedding: Vec<f64>) -> napi::Result<()> {
+        // Validate inputs before entering closure
+        validate_embedding_size(&embedding)?;
+        let frame_id_u64 = i64_to_usize(frame_id)? as u64;
+
+        self.with_memvid(move |memvid| {
+            // Convert f64 to f32
+            let embedding_f32: Vec<f32> = embedding.iter().map(|&x| x as f32).collect();
+
+            memvid
+                .add_clip_embedding(frame_id_u64, embedding_f32)
+                .map_err(memvid_to_napi_error)?;
+            Ok(())
+        })
+    }
+
+    /// Add a CLIP embedding for a frame with page number
+    ///
+    /// This adds the visual embedding to the CLIP index with page information.
+    /// Page is 1-indexed (for PDF pages).
+    #[napi]
+    pub fn add_clip_embedding_with_page(
+        &self,
+        frame_id: i64,
+        page: i32,
+        embedding: Vec<f64>,
+    ) -> napi::Result<()> {
+        // Validate inputs before entering closure
+        validate_embedding_size(&embedding)?;
+        let frame_id_u64 = i64_to_usize(frame_id)? as u64;
+        let page_u32 = if page > 0 { Some(page as u32) } else { None };
+
+        self.with_memvid(move |memvid| {
+            // Convert f64 to f32
+            let embedding_f32: Vec<f32> = embedding.iter().map(|&x| x as f32).collect();
+
+            memvid
+                .add_clip_embedding_with_page(frame_id_u64, page_u32, embedding_f32)
+                .map_err(memvid_to_napi_error)?;
+            Ok(())
+        })
+    }
+
+    /// Search CLIP index with a pre-computed query embedding
+    ///
+    /// Returns the top_k most similar frames to the query embedding.
+    /// Use an external CLIP model to generate the query embedding from text or image.
+    /// Results are sorted by distance (lower is more similar).
+    #[napi]
+    pub fn clip_search(
+        &self,
+        query_embedding: Vec<f64>,
+        limit: Option<i32>,
+    ) -> napi::Result<Vec<ClipSearchHitResult>> {
+        // Validate inputs before entering closure
+        validate_embedding_size(&query_embedding)?;
+        let top_k = i32_to_usize(limit.unwrap_or(10))?;
+
+        self.with_memvid(move |memvid| {
+            // Convert f64 to f32
+            let query_f32: Vec<f32> = query_embedding.iter().map(|&x| x as f32).collect();
+
+            let clip_hits = memvid
+                .search_clip(&query_f32, top_k)
+                .map_err(memvid_to_napi_error)?;
+
+            // Convert ClipSearchHit to ClipSearchHitResult
+            let hits: napi::Result<Vec<ClipSearchHitResult>> = clip_hits
+                .into_iter()
+                .map(|h| {
+                    Ok(ClipSearchHitResult {
+                        frame_id: u64_to_i64(h.frame_id)?,
+                        page: h.page.map(|p| p as i32),
+                        distance: h.distance as f64,
+                    })
+                })
+                .collect();
+
+            hits
         })
     }
 
@@ -1904,6 +2102,83 @@ impl MemvidHandle {
         })
     }
 
+    /// Get the enrichment queue
+    ///
+    /// Returns a list of all pending enrichment tasks.
+    #[napi]
+    pub fn enrichment_queue(&self) -> napi::Result<Vec<EnrichmentTaskResult>> {
+        self.with_memvid(|memvid| {
+            let tasks: Vec<EnrichmentTaskResult> = memvid
+                .enrichment_tasks()
+                .iter()
+                .map(|task| EnrichmentTaskResult {
+                    frame_id: task.frame_id as i64,
+                    created_at: task.created_at as i64,
+                    chunks_done: task.chunks_done as i64,
+                    chunks_total: task.chunks_total as i64,
+                })
+                .collect();
+            Ok(tasks)
+        })
+    }
+
+    /// Process a batch of enrichment tasks
+    ///
+    /// Processes up to `batch_size` tasks from the enrichment queue.
+    /// Returns details about what was processed.
+    #[napi]
+    pub fn process_enrichment_batch(&self, batch_size: i32) -> napi::Result<ProcessBatchResult> {
+        // Validate batch_size
+        if batch_size < 0 {
+            return Err(napi::Error::from_reason(
+                "[INVALID_INPUT] batch_size must be non-negative",
+            ));
+        }
+        // Check for non-integer (this won't happen from JS, but defensive)
+        let batch_size_usize = batch_size as usize;
+
+        self.with_memvid(move |memvid| {
+            let mut tasks_processed = 0i64;
+            let mut tasks_succeeded = 0i64;
+            let mut tasks_failed = 0i64;
+            let mut enriched_frame_ids = Vec::new();
+            let mut errors = Vec::new();
+
+            // Process up to batch_size tasks
+            for _ in 0..batch_size_usize {
+                // Get the next task
+                let task = match memvid.next_enrichment_task() {
+                    Some(t) => t,
+                    None => break, // No more tasks
+                };
+
+                tasks_processed += 1;
+
+                // Process the task
+                let result = memvid.process_enrichment_task(&task);
+
+                // Complete the task (removes from queue)
+                memvid.complete_enrichment_task(task.frame_id);
+
+                if let Some(err) = result.error {
+                    tasks_failed += 1;
+                    errors.push(format!("Frame {}: {}", task.frame_id, err));
+                } else {
+                    tasks_succeeded += 1;
+                    enriched_frame_ids.push(task.frame_id as i64);
+                }
+            }
+
+            Ok(ProcessBatchResult {
+                tasks_processed,
+                tasks_succeeded,
+                tasks_failed,
+                enriched_frame_ids,
+                errors,
+            })
+        })
+    }
+
     // ========================================================================
     // Table Processing
     // ========================================================================
@@ -2224,6 +2499,165 @@ impl MemvidHandle {
                 .map_err(memvid_to_napi_error)?;
 
             Ok(Buffer::from(bytes))
+        })
+    }
+
+    // ========================================================================
+    // Optimization Operations
+    // ========================================================================
+
+    /// Vacuum the file to reclaim space from deleted frames
+    ///
+    /// This operation:
+    /// - Commits any pending changes
+    /// - Removes deleted frames and their payloads
+    /// - Rebuilds indexes with only active frames
+    ///
+    /// Returns statistics about the vacuum operation.
+    #[napi]
+    pub fn vacuum(&self) -> napi::Result<VacuumResultOutput> {
+        self.with_memvid(|memvid| {
+            // Get stats before vacuum
+            let stats_before = memvid.stats().map_err(memvid_to_napi_error)?;
+            let size_before = stats_before.size_bytes;
+
+            // Perform vacuum
+            memvid.vacuum().map_err(memvid_to_napi_error)?;
+
+            // Get stats after vacuum
+            let stats_after = memvid.stats().map_err(memvid_to_napi_error)?;
+            let size_after = stats_after.size_bytes;
+
+            // Calculate bytes reclaimed
+            let bytes_reclaimed = if size_before > size_after {
+                size_before - size_after
+            } else {
+                0
+            };
+
+            Ok(VacuumResultOutput {
+                bytes_reclaimed: u64_to_i64(bytes_reclaimed)?,
+                frames_retained: u64_to_i64(stats_after.active_frame_count)?,
+                size_before: u64_to_i64(size_before)?,
+                size_after: u64_to_i64(size_after)?,
+            })
+        })
+    }
+
+    /// Compact the write-ahead log
+    ///
+    /// This operation commits pending changes and compacts the WAL.
+    /// In memvid, the WAL is embedded in the file with a fixed size,
+    /// so compaction just commits pending changes.
+    ///
+    /// Returns statistics about the compaction operation.
+    #[napi]
+    pub fn compact_wal(&self) -> napi::Result<CompactWalResultOutput> {
+        self.with_memvid(|memvid| {
+            // Get stats to get WAL info
+            let stats = memvid.stats().map_err(memvid_to_napi_error)?;
+
+            // In memvid, the WAL is embedded with fixed size.
+            // There's no exposed pending count, so we track 0 since
+            // commit always clears the pending state.
+            let wal_size = stats.wal_bytes;
+
+            // Commit to flush pending changes
+            memvid.commit().map_err(memvid_to_napi_error)?;
+
+            // After commit, pending is always 0
+            Ok(CompactWalResultOutput {
+                records_compacted: 0, // Compact = commit in memvid
+                wal_size_before: wal_size as i64,
+                wal_size_after: wal_size as i64,
+                pending_before: 0,
+                pending_after: 0,
+            })
+        })
+    }
+
+    /// Preview how a document would be chunked without storing it
+    ///
+    /// Returns None if the document is too small to be chunked.
+    /// Use this to generate embeddings for each chunk before calling
+    /// put_with_chunk_embeddings().
+    #[napi]
+    pub fn preview_chunks(&self, content: Buffer) -> napi::Result<Option<Vec<String>>> {
+        let content_vec = content.to_vec();
+        self.with_memvid(move |memvid| Ok(memvid.preview_chunks(&content_vec)))
+    }
+
+    /// Store a document with pre-computed chunk embeddings
+    ///
+    /// Use this when you generate embeddings externally for each chunk.
+    /// Call preview_chunks() first to get the chunks, then generate embeddings
+    /// for each chunk, then call this method.
+    ///
+    /// Returns the frame ID of the stored document.
+    #[napi]
+    pub fn put_with_chunk_embeddings(
+        &self,
+        content: Buffer,
+        parent_embedding: Option<Vec<f64>>,
+        chunk_embeddings: Vec<ChunkEmbeddingInput>,
+        options: Option<PutOptions>,
+    ) -> napi::Result<i64> {
+        // Validate parent embedding if provided
+        if let Some(ref emb) = parent_embedding {
+            validate_embedding_size(emb)?;
+        }
+
+        // Validate chunk embeddings
+        for (i, chunk) in chunk_embeddings.iter().enumerate() {
+            if chunk.embedding.is_empty() {
+                return Err(napi::Error::from_reason(format!(
+                    "[INVALID_INPUT] Chunk embedding at index {} cannot be empty",
+                    i
+                )));
+            }
+            validate_embedding_size(&chunk.embedding)?;
+        }
+
+        let content_vec = content.to_vec();
+        let opts = options.unwrap_or_default();
+
+        // Convert f64 embeddings to f32
+        let parent_emb_f32: Option<Vec<f32>> =
+            parent_embedding.map(|e| e.iter().map(|&x| x as f32).collect());
+
+        let chunk_embs_f32: Vec<Vec<f32>> = chunk_embeddings
+            .into_iter()
+            .map(|c| c.embedding.iter().map(|&x| x as f32).collect())
+            .collect();
+
+        self.with_memvid(move |memvid| {
+            let mut put_opts = memvid_core::PutOptions::builder();
+
+            if let Some(title) = opts.title {
+                put_opts = put_opts.title(title);
+            }
+            if let Some(uri) = opts.uri {
+                put_opts = put_opts.uri(uri);
+            }
+            if let Some(kind) = opts.kind {
+                put_opts = put_opts.kind(kind);
+            }
+            if let Some(labels) = opts.labels {
+                for label in labels {
+                    put_opts = put_opts.label(label);
+                }
+            }
+
+            let frame_id = memvid
+                .put_with_chunk_embeddings(
+                    &content_vec,
+                    parent_emb_f32,
+                    chunk_embs_f32,
+                    put_opts.build(),
+                )
+                .map_err(memvid_to_napi_error)?;
+
+            u64_to_i64(frame_id)
         })
     }
 }

@@ -227,6 +227,11 @@ impl Memvid {
         self.toc.enrichment_queue.tasks.first().cloned()
     }
 
+    /// Get all tasks in the enrichment queue.
+    pub fn enrichment_tasks(&self) -> Vec<EnrichmentTask> {
+        self.toc.enrichment_queue.tasks.clone()
+    }
+
     /// Mark an enrichment task as complete.
     pub fn complete_enrichment_task(&mut self, frame_id: FrameId) {
         self.toc.enrichment_queue.remove(frame_id);

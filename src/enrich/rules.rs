@@ -866,7 +866,7 @@ mod tests {
             "mv2://test/msg-1".to_string(),
             text.to_string(),
             None,
-            1700000000,
+            1_700_000_000,
             None,
         )
     }

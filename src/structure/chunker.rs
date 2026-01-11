@@ -651,14 +651,14 @@ mod tests {
 
     #[test]
     fn test_table_preserved_when_small() {
-        let text = r#"Introduction.
+        let text = r"Introduction.
 
 | Name | Age |
 |------|-----|
 | Alice | 30 |
 | Bob | 25 |
 
-Conclusion."#;
+Conclusion.";
 
         let doc = detect_structure(text);
         let result = chunk_structured(&doc);
@@ -683,12 +683,12 @@ Conclusion."#;
         }
 
         let text = format!(
-            r#"Introduction.
+            r"Introduction.
 
 | Column A | Column B | Column C |
 |----------|----------|----------|
 {}
-Conclusion."#,
+Conclusion.",
             rows
         );
 
