@@ -139,6 +139,14 @@ pub fn compute_file_id(path: &Path) -> Result<FileId> {
     Ok(FileId::new(identifier))
 }
 
+pub fn compute_file_id_with_file(path: &Path, _file: &mut std::fs::File) -> Result<FileId> {
+    let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut path_hasher = Hasher::new();
+    path_hasher.update(canonical_path.to_string_lossy().as_bytes());
+    let identifier = format!("path-{}", &path_hasher.finalize().to_hex()[..32]);
+    Ok(FileId::new(identifier))
+}
+
 fn registry_root() -> Result<PathBuf> {
     let mut last_err: Option<io::Error> = None;
 

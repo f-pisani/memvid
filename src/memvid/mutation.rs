@@ -1911,7 +1911,7 @@ impl Memvid {
         let safe_truncate_len = self.header.footer_offset.max(payload_end);
         let current_len = self.file.metadata()?.len();
         if current_len > safe_truncate_len {
-            match snapshot_lock::try_acquire_exclusive(&self.path)? {
+            match snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)? {
                 Some(_guard) => {
                     self.file.set_len(safe_truncate_len)?;
                 }
@@ -2621,7 +2621,7 @@ impl Memvid {
         let mut _snapshot_guard = None;
 
         if final_len < current_len {
-            _snapshot_guard = snapshot_lock::try_acquire_exclusive(&self.path)?;
+            _snapshot_guard = snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)?;
             if _snapshot_guard.is_none() {
                 tracing::warn!(
                     file.current_len = current_len,

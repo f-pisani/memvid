@@ -511,7 +511,7 @@ impl Memvid {
 
         let snapshot_lock = match lock_mode {
             ReadLockMode::Shared => None,
-            ReadLockMode::None => Some(snapshot_lock::acquire_shared(path_ref)?),
+            ReadLockMode::None => Some(snapshot_lock::acquire_shared(path_ref, &mut file)?),
         };
         let lock = match lock_mode {
             ReadLockMode::Shared => FileLock::acquire_with_mode(&file, LockMode::Shared)?,

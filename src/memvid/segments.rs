@@ -630,7 +630,8 @@ impl Memvid {
                         self.data_end = initial_offset;
                         let current_len = self.file.metadata()?.len();
                         if current_len > initial_offset {
-                            match snapshot_lock::try_acquire_exclusive(&self.path)? {
+                            match snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)?
+                            {
                                 Some(_guard) => {
                                     self.file.set_len(initial_offset)?;
                                 }
