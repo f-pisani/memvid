@@ -1,7 +1,7 @@
 use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 
-use fs2::{lock_contended_error, FileExt};
+use fs2::{FileExt, lock_contended_error};
 
 use crate::error::{MemvidError, Result};
 use crate::registry;

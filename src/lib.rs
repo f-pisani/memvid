@@ -17,7 +17,6 @@ pub mod io;
 pub mod lex;
 mod lock;
 pub mod lockfile;
-mod snapshot_lock;
 pub mod memvid;
 pub mod models;
 pub mod pii;
@@ -26,6 +25,7 @@ mod registry;
 pub(crate) mod retry;
 mod search;
 pub mod signature;
+mod snapshot_lock;
 pub mod structure;
 pub mod table;
 pub mod text;
@@ -96,8 +96,7 @@ pub use lex::{LexIndex, LexIndexArtifact, LexIndexBuilder, LexSearchHit};
 pub use lock::FileLock;
 pub use memvid::{
     BlobReader, EnrichmentHandle, EnrichmentStats, LockSettings, Memvid, OpenReadOptions,
-    ReadLockMode,
-    SketchCandidate, SketchSearchOptions, SketchSearchStats,
+    ReadLockMode, SketchCandidate, SketchSearchOptions, SketchSearchStats,
     mutation::{CommitMode, CommitOptions},
     start_enrichment_worker, start_enrichment_worker_with_embeddings,
 };

@@ -37,7 +37,11 @@ fn wait_for_exit(child: &mut Child, timeout: Duration) -> Result<(), String> {
     }
 }
 
-fn spawn_lock_holder(mode: &str, path: &Path, dir: &TempDir) -> Result<(Child, PathBuf, PathBuf), String> {
+fn spawn_lock_holder(
+    mode: &str,
+    path: &Path,
+    dir: &TempDir,
+) -> Result<(Child, PathBuf, PathBuf), String> {
     let token = fastrand::u64(..);
     let ready_path = dir.path().join(format!("ready_{token}"));
     let release_path = dir.path().join(format!("release_{token}"));
@@ -91,7 +95,10 @@ fn shared_lock_allows_shared_blocks_exclusive() {
         .write(true)
         .open(&path)
         .expect("open probe");
-    assert!(probe.try_lock_exclusive().is_err(), "lock should be contended");
+    assert!(
+        probe.try_lock_exclusive().is_err(),
+        "lock should be contended"
+    );
 
     let shared = Memvid::open_read_only(&path).expect("shared open");
     assert!(shared.is_read_only());

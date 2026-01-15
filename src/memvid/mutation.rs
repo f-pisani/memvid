@@ -43,13 +43,13 @@ use crate::footer::CommitFooter;
 use crate::io::wal::{EmbeddedWal, WalRecord};
 use crate::memvid::chunks::{plan_document_chunks, plan_text_chunks};
 use crate::memvid::lifecycle::{Memvid, prepare_toc_bytes};
-use crate::snapshot_lock;
 use crate::reader::{
     DocumentFormat, DocumentReader, PassthroughReader, ReaderDiagnostics, ReaderHint, ReaderOutput,
     ReaderRegistry,
 };
 #[cfg(feature = "lex")]
 use crate::search::{EmbeddedLexSegment, LexWalBatch, TantivySnapshot};
+use crate::snapshot_lock;
 use crate::triplet::TripletExtractor;
 #[cfg(feature = "lex")]
 use crate::types::TantivySegmentDescriptor;

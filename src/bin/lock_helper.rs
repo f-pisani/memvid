@@ -48,9 +48,7 @@ fn parse_args() -> Result<Config, String> {
                 release_path = args.next().map(PathBuf::from);
             }
             "--timeout-ms" => {
-                timeout_ms = args
-                    .next()
-                    .and_then(|value| value.parse::<u64>().ok());
+                timeout_ms = args.next().and_then(|value| value.parse::<u64>().ok());
             }
             other => return Err(format!("Unknown argument: {other}")),
         }

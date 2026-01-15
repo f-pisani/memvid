@@ -4,13 +4,13 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::collections::{HashMap, HashSet};
 
 use crate::lex::{LexIndexArtifact, LexIndexBuilder};
+use crate::snapshot_lock;
 #[cfg(feature = "lex")]
 use crate::types::TantivySegmentDescriptor;
 use crate::types::{
     FrameId, FrameRole, FrameStatus, LexSegmentDescriptor, SegmentCommon, TimeSegmentDescriptor,
     VecSegmentDescriptor, VectorCompression,
 };
-use crate::snapshot_lock;
 use crate::vec::{VecIndexArtifact, VecIndexBuilder};
 use crate::vec_pq::{QuantizedVecIndexArtifact, QuantizedVecIndexBuilder};
 use crate::{MemvidError, Result, TimeIndexEntry, time_index_append};

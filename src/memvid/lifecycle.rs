@@ -21,9 +21,9 @@ use crate::io::header::HeaderCodec;
 use crate::io::manifest_wal::ManifestWal;
 use crate::io::wal::EmbeddedWal;
 use crate::lock::{FileLock, LockMode};
-use crate::snapshot_lock::{self, SnapshotLock};
 #[cfg(feature = "lex")]
 use crate::search::{EmbeddedLexStorage, TantivyEngine};
+use crate::snapshot_lock::{self, SnapshotLock};
 #[cfg(feature = "temporal_track")]
 use crate::types::FrameId;
 #[cfg(feature = "parallel_segments")]
