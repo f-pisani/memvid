@@ -56,7 +56,7 @@ fn spawn_lock_holder(
             "--release",
             release_path.to_string_lossy().as_ref(),
             "--timeout-ms",
-            "15000",
+            "30000",
         ])
         .spawn()
         .map_err(|e| e.to_string())?;
