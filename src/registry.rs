@@ -4,6 +4,7 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -21,6 +22,26 @@ const REGISTRY_SUBDIR: &str = "locks";
 const SNAPSHOT_SUBDIR: &str = "snapshots";
 const FILE_LOCK_SUBDIR: &str = "file_locks";
 const ROOT_DIR: &str = ".memvid";
+
+/// Cached registry root path (initialized once per process).
+///
+/// # Caching Behavior
+/// This is initialized on first access and cached for the process lifetime.
+/// Changes to `MEMVID_LOCK_REGISTRY_DIR` environment variable after first
+/// access are ignored. Configure the environment at process startup.
+///
+/// # Thread Safety
+/// Multiple threads may race to initialize; the first to complete wins.
+/// All threads will use the same cached path regardless of initialization order.
+static REGISTRY_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+/// Cached file lock directory path (initialized once per process).
+/// See [`REGISTRY_ROOT`] for caching semantics.
+static FILE_LOCK_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Cached snapshot lock directory path (initialized once per process).
+/// See [`REGISTRY_ROOT`] for caching semantics.
+static SNAPSHOT_LOCK_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FileId {
@@ -150,11 +171,20 @@ pub fn compute_file_id_with_file(path: &Path, _file: &std::fs::File) -> Result<F
 }
 
 fn registry_root() -> Result<PathBuf> {
+    // Use cached path if available to avoid repeated directory operations.
+    if let Some(cached) = REGISTRY_ROOT.get() {
+        return Ok(cached.clone());
+    }
+
     let mut last_err: Option<io::Error> = None;
 
     for candidate in registry_candidates() {
         match ensure_directory(candidate) {
-            Ok(path) => return Ok(path),
+            Ok(path) => {
+                // Cache the successful path for future calls.
+                let _ = REGISTRY_ROOT.set(path.clone());
+                return Ok(path);
+            }
             Err(err) if recoverable_dir_error(&err) => {
                 last_err = Some(err);
             }
@@ -201,14 +231,20 @@ pub(crate) fn ensure_directory(path: PathBuf) -> io::Result<PathBuf> {
             .unwrap_or_default()
             .as_nanos();
         let sentinel = path.join(format!(".write_test.{}.{}", std::process::id(), nanos));
-        match OpenOptions::new().write(true).create_new(true).open(&sentinel) {
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&sentinel)
+        {
             Ok(_) => {
                 let _ = fs::remove_file(sentinel);
                 return Ok(path);
             }
             Err(err)
-                if matches!(err.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied)
-                    && attempts < 3 =>
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied
+                ) && attempts < 3 =>
             {
                 attempts += 1;
                 thread::sleep(Duration::from_millis(10));
@@ -230,12 +266,26 @@ fn record_path(file_id: &FileId) -> Result<PathBuf> {
 }
 
 pub fn snapshot_lock_path(file_id: &FileId) -> Result<PathBuf> {
-    let snapshot_root = ensure_directory(registry_root()?.join(SNAPSHOT_SUBDIR))?;
+    // Use cached directory path to avoid repeated ensure_directory calls.
+    let snapshot_root = if let Some(cached) = SNAPSHOT_LOCK_DIR.get() {
+        cached.clone()
+    } else {
+        let path = ensure_directory(registry_root()?.join(SNAPSHOT_SUBDIR))?;
+        let _ = SNAPSHOT_LOCK_DIR.set(path.clone());
+        path
+    };
     Ok(snapshot_root.join(format!("{}.snapshot.lock", file_id.as_str())))
 }
 
 pub fn file_lock_path(file_id: &FileId) -> Result<PathBuf> {
-    let lock_root = ensure_directory(registry_root()?.join(FILE_LOCK_SUBDIR))?;
+    // Use cached directory path to avoid repeated ensure_directory calls.
+    let lock_root = if let Some(cached) = FILE_LOCK_DIR.get() {
+        cached.clone()
+    } else {
+        let path = ensure_directory(registry_root()?.join(FILE_LOCK_SUBDIR))?;
+        let _ = FILE_LOCK_DIR.set(path.clone());
+        path
+    };
     Ok(lock_root.join(format!("{}.file.lock", file_id.as_str())))
 }
 
@@ -296,4 +346,215 @@ pub fn is_stale(record: &LockRecord, grace: Duration) -> bool {
 
 pub fn to_owner_hint(record: Option<LockRecord>) -> Option<LockOwnerHint> {
     record.map(|r| r.to_owner_hint())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use std::thread;
+
+    /// Verify that registry_root returns consistent results across multiple calls.
+    /// This tests the OnceLock caching behavior.
+    #[test]
+    fn registry_root_returns_consistent_path() {
+        let path1 = registry_root().expect("first call");
+        let path2 = registry_root().expect("second call");
+        let path3 = registry_root().expect("third call");
+
+        assert_eq!(path1, path2, "registry_root should return same path");
+        assert_eq!(path2, path3, "registry_root should return same path");
+    }
+
+    /// Verify that file_lock_path returns consistent directory across calls.
+    #[test]
+    fn file_lock_path_uses_cached_directory() {
+        let file_id_1 = FileId::new("test-file-1".to_string());
+        let file_id_2 = FileId::new("test-file-2".to_string());
+
+        let path1 = file_lock_path(&file_id_1).expect("first file");
+        let path2 = file_lock_path(&file_id_2).expect("second file");
+
+        // Both should be in the same directory (cached)
+        assert_eq!(
+            path1.parent(),
+            path2.parent(),
+            "lock files should be in same cached directory"
+        );
+    }
+
+    /// Verify that snapshot_lock_path returns consistent directory across calls.
+    #[test]
+    fn snapshot_lock_path_uses_cached_directory() {
+        let file_id_1 = FileId::new("test-snap-1".to_string());
+        let file_id_2 = FileId::new("test-snap-2".to_string());
+
+        let path1 = snapshot_lock_path(&file_id_1).expect("first snapshot");
+        let path2 = snapshot_lock_path(&file_id_2).expect("second snapshot");
+
+        assert_eq!(
+            path1.parent(),
+            path2.parent(),
+            "snapshot locks should be in same cached directory"
+        );
+    }
+
+    /// Test concurrent calls to registry_root from multiple threads.
+    /// All threads should get the same cached path.
+    #[test]
+    fn concurrent_registry_root_returns_same_path() {
+        const NUM_THREADS: usize = 10;
+
+        let results: Arc<std::sync::Mutex<Vec<PathBuf>>> =
+            Arc::new(std::sync::Mutex::new(Vec::with_capacity(NUM_THREADS)));
+
+        let handles: Vec<_> = (0..NUM_THREADS)
+            .map(|_| {
+                let results = Arc::clone(&results);
+                thread::spawn(move || {
+                    let path = registry_root().expect("registry_root should succeed");
+                    results.lock().unwrap().push(path);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("thread should complete");
+        }
+
+        let paths = results.lock().unwrap();
+        assert_eq!(paths.len(), NUM_THREADS);
+
+        // All paths should be identical
+        let first = &paths[0];
+        for (i, path) in paths.iter().enumerate() {
+            assert_eq!(
+                path, first,
+                "thread {} got different path: {:?} vs {:?}",
+                i, path, first
+            );
+        }
+    }
+
+    /// Test concurrent calls to file_lock_path from multiple threads.
+    /// All threads should use the same cached directory.
+    #[test]
+    fn concurrent_file_lock_path_uses_same_directory() {
+        const NUM_THREADS: usize = 10;
+
+        let results: Arc<std::sync::Mutex<Vec<PathBuf>>> =
+            Arc::new(std::sync::Mutex::new(Vec::with_capacity(NUM_THREADS)));
+
+        let handles: Vec<_> = (0..NUM_THREADS)
+            .map(|i| {
+                let results = Arc::clone(&results);
+                thread::spawn(move || {
+                    let file_id = FileId::new(format!("concurrent-test-{}", i));
+                    let path = file_lock_path(&file_id).expect("file_lock_path should succeed");
+                    results.lock().unwrap().push(path);
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().expect("thread should complete");
+        }
+
+        let paths = results.lock().unwrap();
+        assert_eq!(paths.len(), NUM_THREADS);
+
+        // All paths should have the same parent directory
+        let first_parent = paths[0].parent().unwrap();
+        for (i, path) in paths.iter().enumerate() {
+            assert_eq!(
+                path.parent().unwrap(),
+                first_parent,
+                "thread {} got different directory: {:?} vs {:?}",
+                i,
+                path.parent(),
+                first_parent
+            );
+        }
+    }
+
+    /// Test that compute_file_id_with_file produces consistent IDs for the same path.
+    #[test]
+    fn compute_file_id_is_deterministic() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp = NamedTempFile::new().expect("create temp file");
+        writeln!(temp, "test content").expect("write content");
+        let path = temp.path();
+
+        let file1 = std::fs::File::open(path).expect("open file 1");
+        let file2 = std::fs::File::open(path).expect("open file 2");
+
+        let id1 = compute_file_id_with_file(path, &file1).expect("compute id 1");
+        let id2 = compute_file_id_with_file(path, &file2).expect("compute id 2");
+
+        assert_eq!(
+            id1, id2,
+            "same file should produce same ID across different handles"
+        );
+    }
+
+    /// Test that different files produce different IDs.
+    #[test]
+    fn compute_file_id_differs_for_different_files() {
+        use std::io::Write;
+        use tempfile::NamedTempFile;
+
+        let mut temp1 = NamedTempFile::new().expect("create temp file 1");
+        let mut temp2 = NamedTempFile::new().expect("create temp file 2");
+
+        writeln!(temp1, "content 1").expect("write content 1");
+        writeln!(temp2, "content 2").expect("write content 2");
+
+        let file1 = std::fs::File::open(temp1.path()).expect("open file 1");
+        let file2 = std::fs::File::open(temp2.path()).expect("open file 2");
+
+        let id1 = compute_file_id_with_file(temp1.path(), &file1).expect("compute id 1");
+        let id2 = compute_file_id_with_file(temp2.path(), &file2).expect("compute id 2");
+
+        assert_ne!(id1, id2, "different files should produce different IDs");
+    }
+
+    /// Test ensure_directory creates directory and handles concurrent calls.
+    #[test]
+    fn ensure_directory_handles_concurrent_calls() {
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().expect("create temp dir");
+        let test_path = temp_dir.path().join("concurrent_test_dir");
+
+        const NUM_THREADS: usize = 5;
+
+        let path = test_path.clone();
+        let handles: Vec<_> = (0..NUM_THREADS)
+            .map(|_| {
+                let path = path.clone();
+                thread::spawn(move || ensure_directory(path))
+            })
+            .collect();
+
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|h| h.join().expect("thread should complete"))
+            .collect();
+
+        // All should succeed and return the same path
+        for result in &results {
+            assert!(result.is_ok(), "ensure_directory should succeed");
+        }
+
+        let paths: Vec<_> = results.into_iter().map(|r| r.unwrap()).collect();
+        let first = &paths[0];
+        for path in &paths {
+            assert_eq!(path, first, "all threads should return same path");
+        }
+
+        // Directory should exist
+        assert!(test_path.is_dir(), "directory should exist");
+    }
 }

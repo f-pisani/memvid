@@ -226,9 +226,27 @@ impl FileLock {
 }
 
 impl Drop for FileLock {
+    /// Releases the file lock and associated resources.
+    ///
+    /// # Windows Behavior
+    /// On Windows, the lock file handle is explicitly dropped immediately after
+    /// unlocking to ensure the OS releases all resources synchronously. This
+    /// prevents race conditions when the same file is reopened quickly in
+    /// concurrent scenarios (e.g., parallel tests, multi-threaded applications).
+    ///
+    /// Without explicit drop, Windows may delay releasing the lock file handle
+    /// until after struct field drops complete, causing subsequent lock
+    /// acquisitions to fail with "file in use" errors.
     fn drop(&mut self) {
         if self.mode != LockMode::None {
             let _ = self.lock_handle().unlock();
+        }
+        #[cfg(windows)]
+        {
+            // Explicitly close the lock file handle to ensure OS releases
+            // all resources before this drop returns. Required for Windows
+            // mandatory locking semantics.
+            drop(self.lock_file.take());
         }
     }
 }
