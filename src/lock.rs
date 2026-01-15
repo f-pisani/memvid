@@ -179,8 +179,6 @@ impl FileLock {
         } else {
             Some(Self::open_lock_file(path, file)?)
         };
-        #[cfg(not(windows))]
-        let lock_file = None;
 
         #[cfg(windows)]
         if let Some(handle) = lock_file.as_ref() {
