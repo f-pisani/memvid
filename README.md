@@ -290,6 +290,15 @@ cargo run --example test_whisper --features whisper
 
 ---
 
+## Concurrency
+
+- Writers open with `Memvid::open()` (exclusive lock).
+- Readers can use `Memvid::open_read_only()` (shared lock) or `Memvid::open_snapshot()` for lock-free snapshot reads.
+- Snapshot readers see the last committed footer; while snapshots are active, shrink operations (vacuum/rebuild/footer truncation) are deferred and the new footer is appended.
+- Runtime lock metadata lives in the lock registry (override with `MEMVID_LOCK_REGISTRY_DIR`), not alongside `.mv2` files.
+
+---
+
 ## File Format
 
 Everything lives in a single `.mv2` file:
@@ -312,7 +321,7 @@ Everything lives in a single `.mv2` file:
 └────────────────────────────┘
 ```
 
-No `.wal`, `.lock`, `.shm`, or sidecar files. Ever.
+No `.wal`, `.lock`, `.shm`, or sidecar files alongside `.mv2` data.
 
 See [MV2_SPEC.md](MV2_SPEC.md) for the complete file format specification.
 

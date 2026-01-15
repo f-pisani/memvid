@@ -197,6 +197,8 @@ export class Memvid {
   /**
    * Open an existing memvid file
    *
+   * This acquires an exclusive lock for the lifetime of the handle.
+   *
    * @param path - Path to the .mv2 file to open
    * @returns A Memvid instance for the existing file
    *
@@ -208,6 +210,51 @@ export class Memvid {
   static open(path: string): Memvid {
     try {
       const handle = native.open(path);
+      return new Memvid(handle, path);
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Open an existing memvid file in read-only mode (shared lock)
+   *
+   * This acquires a shared lock and avoids blocking other readers.
+   *
+   * @param path - Path to the .mv2 file to open
+   * @returns A Memvid instance for the existing file
+   *
+   * @example
+   * ```typescript
+   * const mem = Memvid.openReadOnly('/tmp/existing.mv2');
+   * ```
+   */
+  static openReadOnly(path: string): Memvid {
+    try {
+      const handle = native.openReadOnly(path);
+      return new Memvid(handle, path);
+    } catch (error) {
+      throw parseNapiError(error as Error);
+    }
+  }
+
+  /**
+   * Open an existing memvid file as a snapshot without acquiring a lock
+   *
+   * This reads the last committed footer for a consistent view even if a writer is active.
+   * While snapshot readers are active, shrink operations are deferred and the footer is appended.
+   *
+   * @param path - Path to the .mv2 file to open
+   * @returns A Memvid instance for the existing file
+   *
+   * @example
+   * ```typescript
+   * const mem = Memvid.openSnapshot('/tmp/existing.mv2');
+   * ```
+   */
+  static openSnapshot(path: string): Memvid {
+    try {
+      const handle = native.openSnapshot(path);
       return new Memvid(handle, path);
     } catch (error) {
       throw parseNapiError(error as Error);
@@ -1260,6 +1307,32 @@ export function create(path: string): Memvid {
  */
 export function open(path: string): Memvid {
   return Memvid.open(path);
+}
+
+/**
+ * Open an existing memvid file in read-only mode (shared lock)
+ *
+ * Convenience function that wraps Memvid.openReadOnly()
+ *
+ * This acquires a shared lock and avoids blocking other readers.
+ *
+ * @param path - Path to the .mv2 file to open
+ * @returns A Memvid instance for the existing file
+ */
+export function openReadOnly(path: string): Memvid {
+  return Memvid.openReadOnly(path);
+}
+
+/**
+ * Open an existing memvid file as a snapshot without acquiring a lock
+ *
+ * Convenience function that wraps Memvid.openSnapshot()
+ *
+ * @param path - Path to the .mv2 file to open
+ * @returns A Memvid instance for the existing file
+ */
+export function openSnapshot(path: string): Memvid {
+  return Memvid.openSnapshot(path);
 }
 
 /**

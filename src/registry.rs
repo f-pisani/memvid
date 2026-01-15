@@ -17,6 +17,7 @@ use crate::error::{LockOwnerHint, Result};
 
 const HEADER_SAMPLE_BYTES: usize = 4 * 1024;
 const REGISTRY_SUBDIR: &str = "locks";
+const SNAPSHOT_SUBDIR: &str = "snapshots";
 const ROOT_DIR: &str = ".memvid";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -181,7 +182,7 @@ fn registry_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn ensure_directory(path: PathBuf) -> io::Result<PathBuf> {
+pub(crate) fn ensure_directory(path: PathBuf) -> io::Result<PathBuf> {
     fs::create_dir_all(&path)?;
     let sentinel = path.join(".write_test");
     match OpenOptions::new()
@@ -207,6 +208,11 @@ fn recoverable_dir_error(err: &io::Error) -> bool {
 
 fn record_path(file_id: &FileId) -> Result<PathBuf> {
     Ok(registry_root()?.join(format!("{}.json", file_id.as_str())))
+}
+
+pub fn snapshot_lock_path(file_id: &FileId) -> Result<PathBuf> {
+    let snapshot_root = ensure_directory(registry_root()?.join(SNAPSHOT_SUBDIR))?;
+    Ok(snapshot_root.join(format!("{}.snapshot.lock", file_id.as_str())))
 }
 
 pub fn write_record(record: &LockRecord) -> Result<()> {

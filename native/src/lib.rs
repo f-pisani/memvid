@@ -2875,7 +2875,7 @@ pub fn create(path: String) -> napi::Result<MemvidHandle> {
 
 /// Open an existing memvid file
 ///
-/// This will open an existing .mv2 file for reading and writing.
+/// This will open an existing .mv2 file for reading and writing with an exclusive lock.
 ///
 /// Security: Path must have .mv2 extension and cannot contain path traversal.
 /// Symlinks are resolved and verified to point to .mv2 files.
@@ -2886,6 +2886,48 @@ pub fn open(path: String) -> napi::Result<MemvidHandle> {
         let path_str = validated_path.to_string_lossy().to_string();
 
         let memvid = Memvid::open(&path_str).map_err(memvid_to_napi_error)?;
+        Ok(MemvidHandle {
+            inner: Arc::new(Mutex::new(Some(memvid))),
+            path: path_str,
+            closed: std::sync::atomic::AtomicBool::new(false),
+        })
+    }))
+}
+
+/// Open an existing memvid file in read-only mode (shared lock).
+///
+/// This will open an existing .mv2 file for reading and acquire a shared lock.
+///
+/// Security: Path must have .mv2 extension and cannot contain path traversal.
+/// Symlinks are resolved and verified to point to .mv2 files.
+#[napi]
+pub fn open_read_only(path: String) -> napi::Result<MemvidHandle> {
+    catch_panic(AssertUnwindSafe(|| {
+        let validated_path = validate_path_for_open(&path)?;
+        let path_str = validated_path.to_string_lossy().to_string();
+
+        let memvid = Memvid::open_read_only(&path_str).map_err(memvid_to_napi_error)?;
+        Ok(MemvidHandle {
+            inner: Arc::new(Mutex::new(Some(memvid))),
+            path: path_str,
+            closed: std::sync::atomic::AtomicBool::new(false),
+        })
+    }))
+}
+
+/// Open an existing memvid file as a snapshot without acquiring a lock.
+///
+/// This reads the last committed footer for a consistent view even if a writer is active.
+///
+/// Security: Path must have .mv2 extension and cannot contain path traversal.
+/// Symlinks are resolved and verified to point to .mv2 files.
+#[napi]
+pub fn open_snapshot(path: String) -> napi::Result<MemvidHandle> {
+    catch_panic(AssertUnwindSafe(|| {
+        let validated_path = validate_path_for_open(&path)?;
+        let path_str = validated_path.to_string_lossy().to_string();
+
+        let memvid = Memvid::open_snapshot(&path_str).map_err(memvid_to_napi_error)?;
         Ok(MemvidHandle {
             inner: Arc::new(Mutex::new(Some(memvid))),
             path: path_str,

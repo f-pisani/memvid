@@ -10,6 +10,7 @@ use crate::types::{
     FrameId, FrameRole, FrameStatus, LexSegmentDescriptor, SegmentCommon, TimeSegmentDescriptor,
     VecSegmentDescriptor, VectorCompression,
 };
+use crate::snapshot_lock;
 use crate::vec::{VecIndexArtifact, VecIndexBuilder};
 use crate::vec_pq::{QuantizedVecIndexArtifact, QuantizedVecIndexBuilder};
 use crate::{MemvidError, Result, TimeIndexEntry, time_index_append};
@@ -627,7 +628,21 @@ impl Memvid {
                     Ok(descriptor) => descriptor,
                     Err(err) => {
                         self.data_end = initial_offset;
-                        self.file.set_len(initial_offset)?;
+                        let current_len = self.file.metadata()?.len();
+                        if current_len > initial_offset {
+                            match snapshot_lock::try_acquire_exclusive(&self.path)? {
+                                Some(_guard) => {
+                                    self.file.set_len(initial_offset)?;
+                                }
+                                None => {
+                                    tracing::warn!(
+                                        file.current_len = current_len,
+                                        file.safe_truncate_len = initial_offset,
+                                        "publish_tantivy_delta: snapshot readers active; skipping rollback truncation"
+                                    );
+                                }
+                            }
+                        }
                         return Err(err);
                     }
                 };

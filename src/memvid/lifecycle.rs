@@ -21,6 +21,7 @@ use crate::io::header::HeaderCodec;
 use crate::io::manifest_wal::ManifestWal;
 use crate::io::wal::EmbeddedWal;
 use crate::lock::{FileLock, LockMode};
+use crate::snapshot_lock::{self, SnapshotLock};
 #[cfg(feature = "lex")]
 use crate::search::{EmbeddedLexStorage, TantivyEngine};
 #[cfg(feature = "temporal_track")]
@@ -49,6 +50,7 @@ pub struct Memvid {
     pub(crate) file: File,
     pub(crate) path: PathBuf,
     pub(crate) lock: FileLock,
+    pub(crate) snapshot_lock: Option<SnapshotLock>,
     pub(crate) read_only: bool,
     pub(crate) header: Header,
     pub(crate) toc: Toc,
@@ -100,8 +102,24 @@ pub struct Memvid {
 
 /// Controls read-only open behaviour for `.mv2` memories.
 #[derive(Debug, Clone, Copy)]
+pub enum ReadLockMode {
+    /// Acquire a shared OS lock.
+    Shared,
+    /// Do not acquire a lock (snapshot semantics).
+    None,
+}
+
+impl Default for ReadLockMode {
+    fn default() -> Self {
+        Self::Shared
+    }
+}
+
+/// Controls read-only open behaviour for `.mv2` memories.
+#[derive(Debug, Clone, Copy)]
 pub struct OpenReadOptions {
     pub allow_repair: bool,
+    pub lock_mode: ReadLockMode,
 }
 
 #[derive(Debug, Clone)]
@@ -129,6 +147,17 @@ impl Default for OpenReadOptions {
     fn default() -> Self {
         Self {
             allow_repair: false,
+            lock_mode: ReadLockMode::Shared,
+        }
+    }
+}
+
+impl OpenReadOptions {
+    #[must_use]
+    pub fn snapshot() -> Self {
+        Self {
+            allow_repair: false,
+            lock_mode: ReadLockMode::None,
         }
     }
 }
@@ -181,6 +210,7 @@ impl Memvid {
             file,
             path: path_ref.to_path_buf(),
             lock,
+            snapshot_lock: None,
             read_only: false,
             header,
             toc,
@@ -356,6 +386,7 @@ impl Memvid {
             file,
             path: path_ref.to_path_buf(),
             lock,
+            snapshot_lock: None,
             read_only,
             header,
             toc,
@@ -444,6 +475,13 @@ impl Memvid {
         Self::open_read_only_with_options(path, OpenReadOptions::default())
     }
 
+    /// Open an existing `.mv2` as a snapshot without acquiring a lock.
+    /// Reads the last committed footer for a consistent view even if a writer is active.
+    /// While snapshot readers are active, shrink operations are deferred and the footer is appended.
+    pub fn open_snapshot<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Self::open_read_only_with_options(path, OpenReadOptions::snapshot())
+    }
+
     pub fn open_read_only_with_options<P: AsRef<Path>>(
         path: P,
         options: OpenReadOptions,
@@ -455,10 +493,10 @@ impl Memvid {
             return Self::open(path_ref);
         }
 
-        Self::open_read_only_snapshot(path_ref)
+        Self::open_read_only_snapshot(path_ref, options.lock_mode)
     }
 
-    fn open_read_only_snapshot(path_ref: &Path) -> Result<Self> {
+    fn open_read_only_snapshot(path_ref: &Path, lock_mode: ReadLockMode) -> Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).open(path_ref)?;
         let TailSnapshot {
             toc,
@@ -471,7 +509,14 @@ impl Memvid {
         header.footer_offset = footer_offset;
         header.toc_checksum = toc.toc_checksum;
 
-        let lock = FileLock::acquire_with_mode(&file, LockMode::Shared)?;
+        let snapshot_lock = match lock_mode {
+            ReadLockMode::Shared => None,
+            ReadLockMode::None => Some(snapshot_lock::acquire_shared(path_ref)?),
+        };
+        let lock = match lock_mode {
+            ReadLockMode::Shared => FileLock::acquire_with_mode(&file, LockMode::Shared)?,
+            ReadLockMode::None => FileLock::unlocked(&file)?,
+        };
         let wal = EmbeddedWal::open_read_only(&file, &header)?;
 
         #[cfg(feature = "lex")]
@@ -484,6 +529,7 @@ impl Memvid {
             file,
             path: path_ref.to_path_buf(),
             lock,
+            snapshot_lock,
             read_only: true,
             header,
             toc,
@@ -1462,6 +1508,8 @@ fn validate_segment_integrity(toc: &Toc, header: &Header, file_len: u64) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lock::{FileLock, LockMode};
+    use std::fs::OpenOptions;
     use tempfile::tempdir;
 
     #[test]
@@ -1488,5 +1536,65 @@ mod tests {
             result,
             Err(MemvidError::AuxiliaryFileDetected { .. })
         ));
+    }
+
+    #[test]
+    fn open_read_only_uses_shared_lock() {
+        let dir = tempdir().expect("tmp");
+        let path = dir.path().join("mem.mv2");
+        let mem = Memvid::create(&path).expect("create");
+        drop(mem);
+
+        let read_only = Memvid::open_read_only(&path).expect("open read only");
+        assert!(read_only.is_read_only());
+        assert_eq!(read_only.lock_handle().mode(), LockMode::Shared);
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open file");
+        let exclusive = FileLock::try_acquire(&file, &path).expect("try exclusive lock");
+        assert!(exclusive.is_none(), "shared lock should block exclusive");
+
+        let second = Memvid::open_read_only(&path).expect("second read only");
+        assert!(second.is_read_only());
+    }
+
+    #[test]
+    fn open_snapshot_has_no_lock() {
+        let dir = tempdir().expect("tmp");
+        let path = dir.path().join("mem.mv2");
+        let mem = Memvid::create(&path).expect("create");
+        drop(mem);
+
+        let snapshot = Memvid::open_snapshot(&path).expect("open snapshot");
+        assert!(snapshot.is_read_only());
+        assert_eq!(snapshot.lock_handle().mode(), LockMode::None);
+    }
+
+    #[test]
+    fn snapshot_prevents_footer_shrink() {
+        let dir = tempdir().expect("tmp");
+        let path = dir.path().join("mem.mv2");
+        let mut mem = Memvid::create(&path).expect("create");
+        mem.put_bytes(b"seed").expect("put");
+        mem.commit().expect("commit");
+
+        let base_len = mem.file.metadata().expect("metadata").len();
+        let extended_len = base_len + 1024 * 1024;
+        mem.file.set_len(extended_len).expect("extend file");
+
+        let snapshot = Memvid::open_snapshot(&path).expect("open snapshot");
+        mem.put_bytes(b"next").expect("put");
+        mem.commit().expect("commit with snapshot");
+
+        let len_after = mem.file.metadata().expect("metadata after").len();
+        assert!(
+            len_after >= extended_len,
+            "expected no shrink with snapshot; len_after={len_after}, extended_len={extended_len}"
+        );
+
+        drop(snapshot);
     }
 }
