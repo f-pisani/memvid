@@ -4,7 +4,8 @@ use std::fmt;
 use std::io::ErrorKind;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use blake3::Hasher;
 use fs_err::{self as fs, File, OpenOptions};
@@ -193,18 +194,27 @@ fn registry_candidates() -> Vec<PathBuf> {
 
 pub(crate) fn ensure_directory(path: PathBuf) -> io::Result<PathBuf> {
     fs::create_dir_all(&path)?;
-    let sentinel = path.join(".write_test");
-    match OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&sentinel)
-    {
-        Ok(_) => {
-            let _ = fs::remove_file(sentinel);
-            Ok(path)
+    let mut attempts = 0;
+    loop {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let sentinel = path.join(format!(".write_test.{}.{}", std::process::id(), nanos));
+        match OpenOptions::new().write(true).create_new(true).open(&sentinel) {
+            Ok(_) => {
+                let _ = fs::remove_file(sentinel);
+                return Ok(path);
+            }
+            Err(err)
+                if matches!(err.kind(), io::ErrorKind::AlreadyExists | io::ErrorKind::PermissionDenied)
+                    && attempts < 3 =>
+            {
+                attempts += 1;
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(err) => return Err(err),
         }
-        Err(err) => Err(err),
     }
 }
 
