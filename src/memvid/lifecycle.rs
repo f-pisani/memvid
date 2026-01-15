@@ -511,10 +511,10 @@ impl Memvid {
 
         let snapshot_lock = match lock_mode {
             ReadLockMode::Shared => None,
-            ReadLockMode::None => Some(snapshot_lock::acquire_shared(path_ref, &mut file)?),
+            ReadLockMode::None => Some(snapshot_lock::acquire_shared(path_ref, &file)?),
         };
         let lock = match lock_mode {
-            ReadLockMode::Shared => FileLock::acquire_with_mode(&file, LockMode::Shared)?,
+            ReadLockMode::Shared => FileLock::acquire_with_mode(&file, path_ref, LockMode::Shared)?,
             ReadLockMode::None => FileLock::unlocked(&file)?,
         };
         let wal = EmbeddedWal::open_read_only(&file, &header)?;

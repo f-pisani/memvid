@@ -1,10 +1,10 @@
 use std::env;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::path::PathBuf;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use fs2::FileExt;
+use memvid_core::FileLock;
 
 #[derive(Debug, Clone, Copy)]
 enum LockMode {
@@ -72,15 +72,11 @@ fn parse_args() -> Result<Config, String> {
 fn main() -> Result<(), String> {
     let config = parse_args()?;
 
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&config.path)
-        .map_err(|e| e.to_string())?;
-    match config.mode {
-        LockMode::Shared => file.lock_shared().map_err(|e| e.to_string())?,
-        LockMode::Exclusive => file.lock_exclusive().map_err(|e| e.to_string())?,
+    let (file, lock) = match config.mode {
+        LockMode::Shared => FileLock::open_read_only(&config.path),
+        LockMode::Exclusive => FileLock::open_and_lock(&config.path),
     }
+    .map_err(|e| e.to_string())?;
 
     fs::write(&config.ready_path, b"ready").map_err(|e| e.to_string())?;
 
@@ -92,6 +88,7 @@ fn main() -> Result<(), String> {
         thread::sleep(Duration::from_millis(25));
     }
 
+    drop(lock);
     drop(file);
     Ok(())
 }

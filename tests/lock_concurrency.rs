@@ -1,7 +1,6 @@
 //! Cross-process lock contention tests.
 
-use fs2::FileExt;
-use memvid_core::{Memvid, MemvidError};
+use memvid_core::{FileLock, Memvid, MemvidError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -78,6 +77,16 @@ fn expect_lock_error(result: memvid_core::Result<Memvid>) {
     }
 }
 
+fn assert_exclusive_contended(path: &Path) {
+    let probe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("open probe");
+    let guard = FileLock::try_acquire(&probe, path).expect("try exclusive lock");
+    assert!(guard.is_none(), "lock should be contended");
+}
+
 #[test]
 fn shared_lock_allows_shared_blocks_exclusive() {
     let dir = TempDir::new().expect("tmp");
@@ -90,15 +99,7 @@ fn shared_lock_allows_shared_blocks_exclusive() {
     let (mut child, _ready, release) =
         spawn_lock_holder("shared", &path, &dir).expect("spawn lock holder");
 
-    let probe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .expect("open probe");
-    assert!(
-        probe.try_lock_exclusive().is_err(),
-        "lock should be contended"
-    );
+    assert_exclusive_contended(&path);
 
     let shared = Memvid::open_read_only(&path).expect("shared open");
     assert!(shared.is_read_only());
@@ -122,12 +123,7 @@ fn exclusive_lock_blocks_shared() {
     let (mut child, _ready, release) =
         spawn_lock_holder("exclusive", &path, &dir).expect("spawn lock holder");
 
-    let probe = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .expect("open probe");
-    assert!(probe.try_lock_shared().is_err(), "lock should be contended");
+    assert_exclusive_contended(&path);
 
     let open_result = Memvid::open_read_only(&path);
     fs::write(&release, b"release").expect("release");

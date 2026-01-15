@@ -296,6 +296,7 @@ cargo run --example test_whisper --features whisper
 - Readers can use `Memvid::open_read_only()` (shared lock) or `Memvid::open_snapshot()` for lock-free snapshot reads.
 - Snapshot readers see the last committed footer; while snapshots are active, shrink operations (vacuum/rebuild/footer truncation) are deferred and the new footer is appended.
 - Runtime lock metadata lives in the lock registry (override with `MEMVID_LOCK_REGISTRY_DIR`), not alongside `.mv2` files.
+- On Windows, OS locks are held on registry lock files to avoid mandatory lock violations on `.mv2` data.
 
 ---
 

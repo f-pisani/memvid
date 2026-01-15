@@ -54,7 +54,7 @@ impl Drop for SnapshotLock {
     }
 }
 
-pub(crate) fn acquire_shared(path: &Path, file: &mut File) -> Result<SnapshotLock> {
+pub(crate) fn acquire_shared(path: &Path, file: &File) -> Result<SnapshotLock> {
     let file_id = registry::compute_file_id_with_file(path, file)?;
     let lock_path = registry::snapshot_lock_path(&file_id)?;
     let lock_file = OpenOptions::new()
@@ -73,7 +73,7 @@ pub(crate) fn acquire_shared(path: &Path, file: &mut File) -> Result<SnapshotLoc
     })
 }
 
-pub(crate) fn try_acquire_exclusive(path: &Path, file: &mut File) -> Result<Option<SnapshotLock>> {
+pub(crate) fn try_acquire_exclusive(path: &Path, file: &File) -> Result<Option<SnapshotLock>> {
     let file_id = registry::compute_file_id_with_file(path, file)?;
     if has_in_process_readers(file_id.as_str()) {
         return Ok(None);

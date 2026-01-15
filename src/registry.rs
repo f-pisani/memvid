@@ -18,6 +18,7 @@ use crate::error::{LockOwnerHint, Result};
 const HEADER_SAMPLE_BYTES: usize = 4 * 1024;
 const REGISTRY_SUBDIR: &str = "locks";
 const SNAPSHOT_SUBDIR: &str = "snapshots";
+const FILE_LOCK_SUBDIR: &str = "file_locks";
 const ROOT_DIR: &str = ".memvid";
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -139,7 +140,7 @@ pub fn compute_file_id(path: &Path) -> Result<FileId> {
     Ok(FileId::new(identifier))
 }
 
-pub fn compute_file_id_with_file(path: &Path, _file: &mut std::fs::File) -> Result<FileId> {
+pub fn compute_file_id_with_file(path: &Path, _file: &std::fs::File) -> Result<FileId> {
     let canonical_path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let mut path_hasher = Hasher::new();
     path_hasher.update(canonical_path.to_string_lossy().as_bytes());
@@ -221,6 +222,11 @@ fn record_path(file_id: &FileId) -> Result<PathBuf> {
 pub fn snapshot_lock_path(file_id: &FileId) -> Result<PathBuf> {
     let snapshot_root = ensure_directory(registry_root()?.join(SNAPSHOT_SUBDIR))?;
     Ok(snapshot_root.join(format!("{}.snapshot.lock", file_id.as_str())))
+}
+
+pub fn file_lock_path(file_id: &FileId) -> Result<PathBuf> {
+    let lock_root = ensure_directory(registry_root()?.join(FILE_LOCK_SUBDIR))?;
+    Ok(lock_root.join(format!("{}.file.lock", file_id.as_str())))
 }
 
 pub fn write_record(record: &LockRecord) -> Result<()> {
