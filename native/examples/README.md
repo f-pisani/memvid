@@ -125,7 +125,7 @@ Key features demonstrated:
 ### Creating and Opening Files
 
 ```typescript
-import { create, open } from '@fpisani/memvid';
+import { create, open, openReadOnly, openSnapshot } from '@fpisani/memvid';
 
 // Create new file
 const mem = create('./my-memory.mv2');
@@ -137,8 +137,14 @@ mem.put(Buffer.from('content'), { title: 'My Document' });
 mem.commit();
 mem.close();
 
-// Reopen later
+// Reopen later (exclusive lock)
 const mem2 = open('./my-memory.mv2');
+
+// Read-only access (shared lock for concurrent readers)
+const mem3 = openReadOnly('./my-memory.mv2');
+
+// Snapshot access (no lock, consistent last-commit view)
+const mem4 = openSnapshot('./my-memory.mv2');
 ```
 
 ### Searching

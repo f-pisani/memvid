@@ -61,10 +61,29 @@ const mem = create('/tmp/memory.mv2');
 
 #### `open(path: string): Memvid`
 
-Open an existing memvid file.
+Open an existing memvid file with an exclusive lock.
 
 ```typescript
 const mem = open('/tmp/existing.mv2');
+```
+
+#### `openReadOnly(path: string): Memvid`
+
+Open an existing memvid file in read-only mode (shared lock) for concurrent readers.
+
+```typescript
+const mem = openReadOnly('/tmp/existing.mv2');
+```
+
+#### `openSnapshot(path: string): Memvid`
+
+Open an existing memvid file as a snapshot without acquiring a lock.
+This reads the last committed footer for a consistent view even if a writer is active.
+While snapshot readers are active, shrink operations (vacuum/rebuild/footer truncation)
+are deferred and the latest footer is appended.
+
+```typescript
+const mem = openSnapshot('/tmp/existing.mv2');
 ```
 
 #### `version(): string`

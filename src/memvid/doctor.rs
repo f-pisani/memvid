@@ -4,6 +4,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use crate::FileLock;
 use crate::error::{MemvidError, Result};
 use crate::io::header::HeaderCodec;
 use crate::io::time_index::{calculate_checksum as time_index_checksum, read_track};
@@ -58,13 +59,8 @@ pub(crate) fn doctor_plan(path: &Path, options: DoctorOptions) -> Result<DoctorP
 
 /// Attempt to recover from WAL corruption by rebuilding a clean WAL
 fn try_recover_from_wal_corruption(path: &Path) -> Result<Memvid> {
-    use fs2::FileExt;
-
     println!("doctor: opening file for WAL recovery");
-    let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-
-    // Acquire exclusive lock
-    file.lock_exclusive()?;
+    let (mut file, lock) = FileLock::open_and_lock(path)?;
 
     println!("doctor: reading header");
     let mut header = HeaderCodec::read(&mut file)?;
@@ -100,6 +96,7 @@ fn try_recover_from_wal_corruption(path: &Path) -> Result<Memvid> {
 
     // Now try to open the file normally - WAL should be clean
     // We need to release the lock first, then reopen
+    drop(lock);
     drop(file);
 
     Memvid::try_open(path)

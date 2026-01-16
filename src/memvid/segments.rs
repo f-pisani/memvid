@@ -4,6 +4,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::collections::{HashMap, HashSet};
 
 use crate::lex::{LexIndexArtifact, LexIndexBuilder};
+use crate::snapshot_lock;
 #[cfg(feature = "lex")]
 use crate::types::TantivySegmentDescriptor;
 use crate::types::{
@@ -627,7 +628,22 @@ impl Memvid {
                     Ok(descriptor) => descriptor,
                     Err(err) => {
                         self.data_end = initial_offset;
-                        self.file.set_len(initial_offset)?;
+                        let current_len = self.file.metadata()?.len();
+                        if current_len > initial_offset {
+                            match snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)?
+                            {
+                                Some(_guard) => {
+                                    self.file.set_len(initial_offset)?;
+                                }
+                                None => {
+                                    tracing::warn!(
+                                        file.current_len = current_len,
+                                        file.safe_truncate_len = initial_offset,
+                                        "publish_tantivy_delta: snapshot readers active; skipping rollback truncation"
+                                    );
+                                }
+                            }
+                        }
                         return Err(err);
                     }
                 };

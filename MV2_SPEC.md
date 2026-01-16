@@ -211,7 +211,7 @@ Examples:
 
 ## Invariants
 
-1. **Single-file guarantee**: No `.wal`, `.shm`, `.lock`, or other sidecar files
+1. **Single-file guarantee**: No `.wal`, `.shm`, `.lock`, or other sidecar files alongside `.mv2` data (runtime lock metadata and OS lock files live in the registry directory)
 2. **Append-only frames**: Existing frames are never modified in place
 3. **Determinism**: Same API calls produce identical bytes
 4. **Crash safety**: WAL ensures durability across unexpected termination

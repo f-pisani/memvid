@@ -49,6 +49,7 @@ use crate::reader::{
 };
 #[cfg(feature = "lex")]
 use crate::search::{EmbeddedLexSegment, LexWalBatch, TantivySnapshot};
+use crate::snapshot_lock;
 use crate::triplet::TripletExtractor;
 #[cfg(feature = "lex")]
 use crate::types::TantivySegmentDescriptor;
@@ -1908,8 +1909,20 @@ impl Memvid {
         // Don't truncate if footer_offset is higher - there may be replay segments
         // or other data written after payload_end that must be preserved.
         let safe_truncate_len = self.header.footer_offset.max(payload_end);
-        if self.file.metadata()?.len() > safe_truncate_len {
-            self.file.set_len(safe_truncate_len)?;
+        let current_len = self.file.metadata()?.len();
+        if current_len > safe_truncate_len {
+            match snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)? {
+                Some(_guard) => {
+                    self.file.set_len(safe_truncate_len)?;
+                }
+                None => {
+                    tracing::warn!(
+                        file.current_len = current_len,
+                        file.safe_truncate_len = safe_truncate_len,
+                        "rebuild_indexes: snapshot readers active; skipping truncation"
+                    );
+                }
+            }
         }
         self.file.seek(SeekFrom::Start(payload_end))?;
 
@@ -2592,21 +2605,36 @@ impl Memvid {
             "rewrite_toc_footer: about to serialize TOC"
         );
         let toc_bytes = prepare_toc_bytes(&mut self.toc)?;
-        let footer_offset = self.header.footer_offset;
-        self.file.seek(SeekFrom::Start(footer_offset))?;
-        self.file.write_all(&toc_bytes)?;
         let footer = CommitFooter {
             toc_len: toc_bytes.len() as u64,
             toc_hash: *hash(&toc_bytes).as_bytes(),
             generation: self.generation,
         };
         let encoded_footer = footer.encode();
-        self.file.write_all(&encoded_footer)?;
 
         // The file must always be at least header + WAL size
-        let new_len = footer_offset + toc_bytes.len() as u64 + encoded_footer.len() as u64;
         let min_len = self.header.wal_offset + self.header.wal_size;
-        let final_len = new_len.max(min_len);
+        let mut footer_offset = self.header.footer_offset;
+        let mut new_len = footer_offset + toc_bytes.len() as u64 + encoded_footer.len() as u64;
+        let mut final_len = new_len.max(min_len);
+        let current_len = self.file.metadata()?.len();
+        let mut _snapshot_guard = None;
+
+        if final_len < current_len {
+            _snapshot_guard = snapshot_lock::try_acquire_exclusive(&self.path, &mut self.file)?;
+            if _snapshot_guard.is_none() {
+                tracing::warn!(
+                    file.current_len = current_len,
+                    file.new_len = new_len,
+                    file.final_len = final_len,
+                    "rewrite_toc_footer: snapshot readers active; skipping shrink"
+                );
+                footer_offset = current_len;
+                self.header.footer_offset = footer_offset;
+                new_len = footer_offset + toc_bytes.len() as u64 + encoded_footer.len() as u64;
+                final_len = new_len.max(min_len);
+            }
+        }
 
         if new_len < min_len {
             tracing::warn!(
@@ -2616,6 +2644,10 @@ impl Memvid {
                 "truncation would cut into WAL region, clamping to min_len"
             );
         }
+
+        self.file.seek(SeekFrom::Start(footer_offset))?;
+        self.file.write_all(&toc_bytes)?;
+        self.file.write_all(&encoded_footer)?;
 
         self.file.set_len(final_len)?;
         // Ensure footer is flushed to disk so mmap-based readers can find it

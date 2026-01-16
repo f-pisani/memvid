@@ -25,6 +25,7 @@ mod registry;
 pub(crate) mod retry;
 mod search;
 pub mod signature;
+mod snapshot_lock;
 pub mod structure;
 pub mod table;
 pub mod text;
@@ -95,7 +96,7 @@ pub use lex::{LexIndex, LexIndexArtifact, LexIndexBuilder, LexSearchHit};
 pub use lock::FileLock;
 pub use memvid::{
     BlobReader, EnrichmentHandle, EnrichmentStats, LockSettings, Memvid, OpenReadOptions,
-    SketchCandidate, SketchSearchOptions, SketchSearchStats,
+    ReadLockMode, SketchCandidate, SketchSearchOptions, SketchSearchStats,
     mutation::{CommitMode, CommitOptions},
     start_enrichment_worker, start_enrichment_worker_with_embeddings,
 };
@@ -345,6 +346,8 @@ impl Drop for Memvid {
         if self.dirty {
             let _ = self.commit();
         }
+        // Drop snapshot lock guard early so registry locks release promptly.
+        let _ = self.snapshot_lock.take();
         // On Windows, explicitly drop the Tantivy engine before other resources.
         // TantivyEngine::Drop waits for merging threads to complete and releases
         // all mmap file handles. This must happen before the main file lock is

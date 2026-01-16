@@ -6,6 +6,8 @@ use std::time::Duration;
 use fs2::{FileExt, lock_contended_error};
 
 use crate::error::{MemvidError, Result};
+#[cfg(windows)]
+use crate::registry;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LockMode {
@@ -18,20 +20,45 @@ pub enum LockMode {
 pub struct FileLock {
     file: File,
     mode: LockMode,
+    #[cfg(windows)]
+    lock_file: Option<File>,
 }
 
 impl FileLock {
+    #[cfg(windows)]
+    fn open_lock_file(path: &Path, file: &File) -> Result<File> {
+        let file_id = registry::compute_file_id_with_file(path, file)?;
+        let lock_path = registry::file_lock_path(&file_id)?;
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&lock_path)?;
+        Ok(lock_file)
+    }
+
+    fn lock_handle(&self) -> &File {
+        #[cfg(windows)]
+        {
+            self.lock_file.as_ref().unwrap_or(&self.file)
+        }
+        #[cfg(not(windows))]
+        {
+            &self.file
+        }
+    }
+
     /// Opens a file at `path` with read/write permissions and acquires an exclusive lock.
     pub fn open_and_lock(path: &Path) -> Result<(File, Self)> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
-        let guard = Self::acquire_with_mode(&file, LockMode::Exclusive)?;
+        let guard = Self::acquire_with_mode(&file, path, LockMode::Exclusive)?;
         Ok((file, guard))
     }
 
     /// Opens a file at `path` with read/write permissions and acquires a shared lock.
     pub fn open_read_only(path: &Path) -> Result<(File, Self)> {
         let file = OpenOptions::new().read(true).write(true).open(path)?;
-        let guard = Self::acquire_with_mode(&file, LockMode::Shared)?;
+        let guard = Self::acquire_with_mode(&file, path, LockMode::Shared)?;
         Ok((file, guard))
     }
 
@@ -40,31 +67,43 @@ impl FileLock {
         Ok(Self {
             file: file.try_clone()?,
             mode: LockMode::None,
+            #[cfg(windows)]
+            lock_file: None,
         })
     }
 
     /// Clones the provided file handle and locks it exclusively.
-    pub fn acquire(file: &File, _path: &Path) -> Result<Self> {
-        Self::acquire_with_mode(file, LockMode::Exclusive)
+    pub fn acquire(file: &File, path: &Path) -> Result<Self> {
+        Self::acquire_with_mode(file, path, LockMode::Exclusive)
     }
 
     /// Attempts a non-blocking exclusive lock, returning None if already locked.
     ///
-    /// IMPORTANT: We must clone the file handle rather than opening a new one.
-    /// On Windows, exclusive locks acquired on a separately-opened handle block
-    /// all other handles (even in the same process) from accessing the file.
-    /// By cloning, we share the same underlying OS file object, which allows
-    /// both handles to access the file while the lock is held.
-    pub fn try_acquire(file: &File, _path: &Path) -> Result<Option<Self>> {
+    /// IMPORTANT: We clone the data handle so callers get a stable file object.
+    /// On Windows we lock a registry lock file instead of the `.mv2` itself to
+    /// avoid mandatory lock violations on concurrent readers.
+    pub fn try_acquire(file: &File, path: &Path) -> Result<Option<Self>> {
+        #[cfg(not(windows))]
+        let _ = path;
+
         let clone = file.try_clone()?;
+        #[cfg(windows)]
+        let lock_file = Self::open_lock_file(path, file)?;
         let contended_kind = lock_contended_error().kind();
 
         loop {
-            match clone.try_lock_exclusive() {
+            #[cfg(windows)]
+            let result = lock_file.try_lock_exclusive();
+            #[cfg(not(windows))]
+            let result = clone.try_lock_exclusive();
+
+            match result {
                 Ok(()) => {
                     return Ok(Some(Self {
                         file: clone,
                         mode: LockMode::Exclusive,
+                        #[cfg(windows)]
+                        lock_file: Some(lock_file),
                     }));
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
@@ -79,7 +118,7 @@ impl FileLock {
         if self.mode == LockMode::None {
             return Ok(());
         }
-        self.file
+        self.lock_handle()
             .unlock()
             .map_err(|err| MemvidError::Lock(err.to_string()))
     }
@@ -102,10 +141,11 @@ impl FileLock {
         if self.mode == LockMode::Shared {
             return Ok(());
         }
-        self.file
+        let lock_handle = self.lock_handle();
+        lock_handle
             .unlock()
             .map_err(|err| MemvidError::Lock(err.to_string()))?;
-        Self::lock_with_retry(&self.file, LockMode::Shared)?;
+        Self::lock_with_retry(lock_handle, LockMode::Shared)?;
         self.mode = LockMode::Shared;
         Ok(())
     }
@@ -119,18 +159,40 @@ impl FileLock {
         if self.mode == LockMode::Exclusive {
             return Ok(());
         }
-        self.file
+        let lock_handle = self.lock_handle();
+        lock_handle
             .unlock()
             .map_err(|err| MemvidError::Lock(err.to_string()))?;
-        Self::lock_with_retry(&self.file, LockMode::Exclusive)?;
+        Self::lock_with_retry(lock_handle, LockMode::Exclusive)?;
         self.mode = LockMode::Exclusive;
         Ok(())
     }
 
-    pub(crate) fn acquire_with_mode(file: &File, mode: LockMode) -> Result<Self> {
+    pub(crate) fn acquire_with_mode(file: &File, path: &Path, mode: LockMode) -> Result<Self> {
+        #[cfg(not(windows))]
+        let _ = path;
+
         let clone = file.try_clone()?;
+        #[cfg(windows)]
+        let lock_file = if mode == LockMode::None {
+            None
+        } else {
+            Some(Self::open_lock_file(path, file)?)
+        };
+
+        #[cfg(windows)]
+        if let Some(handle) = lock_file.as_ref() {
+            Self::lock_with_retry(handle, mode)?;
+        }
+        #[cfg(not(windows))]
         Self::lock_with_retry(&clone, mode)?;
-        Ok(Self { file: clone, mode })
+
+        Ok(Self {
+            file: clone,
+            mode,
+            #[cfg(windows)]
+            lock_file,
+        })
     }
 
     fn lock_with_retry(file: &File, mode: LockMode) -> Result<()> {
@@ -164,9 +226,27 @@ impl FileLock {
 }
 
 impl Drop for FileLock {
+    /// Releases the file lock and associated resources.
+    ///
+    /// # Windows Behavior
+    /// On Windows, the lock file handle is explicitly dropped immediately after
+    /// unlocking to ensure the OS releases all resources synchronously. This
+    /// prevents race conditions when the same file is reopened quickly in
+    /// concurrent scenarios (e.g., parallel tests, multi-threaded applications).
+    ///
+    /// Without explicit drop, Windows may delay releasing the lock file handle
+    /// until after struct field drops complete, causing subsequent lock
+    /// acquisitions to fail with "file in use" errors.
     fn drop(&mut self) {
         if self.mode != LockMode::None {
-            let _ = self.file.unlock();
+            let _ = self.lock_handle().unlock();
+        }
+        #[cfg(windows)]
+        {
+            // Explicitly close the lock file handle to ensure OS releases
+            // all resources before this drop returns. Required for Windows
+            // mandatory locking semantics.
+            drop(self.lock_file.take());
         }
     }
 }
